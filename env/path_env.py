@@ -4,6 +4,9 @@ import numpy as np
 import pygame
 from enum import Enum
 
+#from maps import GridMap
+from constraints.reward_manager import RewardManager
+from constraints.collision import CollisionConstraint
 from utils.helpers import getFOV, getTrajectoryinFOV
 
 """A simple Gym environment where an agent must learn to follow a chosen path on a 2D grid.
@@ -24,9 +27,14 @@ class Actions(Enum):
 class PathEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 4}
     
-    def __init__(self, render_mode=None, grid_size=(10,10), path=None, fov=(3,3), max_steps=200):
+    def __init__(self, render_mode=None, grid_map=None, path=None, fov=(3,3), max_steps=200):
         
-        self.W, self.H = grid_size
+        # check that there's a map
+        assert grid_map is not None
+        self.map = grid_map
+        self.W = self.map.W
+        self.H = self.map.H
+
         self.window_size = 512
 
         # validate path and normalize
@@ -39,6 +47,12 @@ class PathEnv(gym.Env):
         self.fov = getFOV(self.agent_pos, self.fov_w, self.fov_h, self.W, self.H)
         self.trajectory_in_fov = getTrajectoryinFOV(self.fov, self.path)
         
+        # CONSTRAINTS
+        self.reward_manager = RewardManager()
+        self.reward_manager.add_constraint(CollisionConstraint(penalty=-5))
+
+
+
         self.max_steps = max_steps
 
 
@@ -86,6 +100,13 @@ class PathEnv(gym.Env):
             "fov": np.array(self.fov, dtype=np.int32),
             "trajectory": self.trajectory_in_fov,
         }
+    
+    def _get_state(self):
+        return {
+            "agent_pos": (int(self.agent_pos[0]), int(self.agent_pos[1])),
+            "map": self.map
+        }
+
     
     def reset(self, seed=None, options=None):
         """Start a new episode.
@@ -135,17 +156,30 @@ class PathEnv(gym.Env):
         self.trajectory_in_fov = getTrajectoryinFOV(self.fov, self.path)
 
         terminated = False
-        new_pos_tuple = (int(new_pos[0]), int(new_pos[1])) # convert to tuple for comparison
+        new_pos_tuple = (int(new_pos[1]), int(new_pos[0])) # convert to tuple for comparison
 
+        reward = 0.0
         # Positive reward if agent has advanced on the path
-        if new_pos_tuple == self.path[self.path_index]:
-            self.path_index += 1
+        if new_pos_tuple in self.path:
+            idx = self.path.index(new_pos_tuple)
+            if idx >= self.path_index:
+                self.path_index = idx + 1
+                reward += 1.0
+            else:
+                reward += -1.0
             if self.path_index >= len(self.path): # reached the end of the path
                 terminated = True
-            reward = 1
+            #print("Advanced!")
         # Negative reward if agent deviates from the path
         else:
-            reward = -1
+            reward += -1.0
+            #print("Wrong direction!")
+            #print("Should go in ", self.path[self.path_index])
+
+        # Apply pernalty for violations
+        state = self._get_state()
+        penalty = self.reward_manager.evaluate(state)
+        reward += penalty
 
         self.step_count += 1
 
@@ -179,27 +213,50 @@ class PathEnv(gym.Env):
 
         canvas = pygame.Surface((self.window_size, self.window_size))
         canvas.fill((255, 255, 255)) # White background
+        
         pix_square_size = (self.window_size / self.W)  # size of a single grid square in pixels
+
+        # --- Draw obstacles ---
+        for y in range(self.H):
+            for x in range(self.W):
+                if self.map.obstacles[y, x] == 1:
+                    pygame.draw.rect(
+                        canvas,
+                        (0, 0, 0),  # black
+                        pygame.Rect(
+                            x * pix_square_size,
+                            y * pix_square_size,
+                            pix_square_size,
+                            pix_square_size,
+                        ),
+                    )
+
     
         # Draw the path with a trace
-        for loc in self.path:
+        for (y, x) in self.path:
             pygame.draw.rect(
                 canvas,
                 (200, 200, 200),
                 pygame.Rect(
-                    pix_square_size * np.array(loc),
-                    (pix_square_size, pix_square_size),
+                    x * pix_square_size,
+                    y * pix_square_size,
+                    pix_square_size,
+                    pix_square_size,
                 ),
             )
 
+
         # Draw the target
+        (ty, tx) = self.path[-1]
         pygame.draw.rect(
             canvas,
             (255, 0, 0),
             pygame.Rect(
-                pix_square_size * np.array(self.path[-1]),
-                (pix_square_size, pix_square_size),
-            ),
+                    tx * pix_square_size,
+                    ty * pix_square_size,
+                    pix_square_size,
+                    pix_square_size,
+                ),
         )
 
         # Draw the agent
