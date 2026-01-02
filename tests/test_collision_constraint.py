@@ -12,13 +12,17 @@ obstacle_map[0, 4] = 1
 obstacle_map[1, 0] = 1
 obstacle_map[1, 2] = 1
 
+traffic_light_map = np.zeros((5, 5), dtype=np.int32)
+
+
 # - - 1 1 1 
 # 1 - 1 0 0
 # 0 - - - -
 # 0 0 0 0 0
 # 0 0 0 0 0
 
-grid_map = GridMap(obstacle_map)
+grid_map = GridMap(obstacle_map, traffic_light_map)
+path = [(2,0),(2,1),(2,2),(2,3),(2,4)]
 
 env = PathEnv(
     render_mode=RENDER_MODE_TEST,

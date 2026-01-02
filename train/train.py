@@ -10,20 +10,50 @@ from config.paths import SIMPLE_PATH
 
 def obs_to_array(obs, fov_w, fov_h):
     """
-    Tranform observation into an array, so that it can be processed by the network.
+    Convert observation dict into a flat array for the neural network.
+    Output shape:
+    - trajectory map      (fov_h * fov_w)
+    - obstacle map        (fov_h * fov_w)
+    - traffic light map   (fov_h * fov_w)
+    - agent position      (2,)
     """
-    traj_map = np.zeros((fov_h, fov_w), dtype=np.float32) # initialize fov map with zeros
-    fov_xmin, fov_ymin = obs['fov'][0]
-    fov_xmax, fov_ymax = obs['fov'][1]
 
-    for x, y in obs['trajectory']:
-        if fov_xmin <= x <= fov_xmax and fov_ymin <= y <= fov_ymax:
-            # relative position in fov
-            rx, ry = x - fov_xmin, y - fov_ymin
-            traj_map[ry, rx] = 1.0 # put 1s in cells corresponding to the path in the fov
+    # --- Trajectory map ---
+    traj_map = np.zeros((fov_h, fov_w), dtype=np.float32)
 
-    agent_rel = np.array([obs['agent_pos'][0] - fov_xmin, obs['agent_pos'][1] - fov_ymin], dtype=np.float32) # agent relative position in fov
-    return np.concatenate([traj_map.flatten(), agent_rel])
+    # agent_pos è RELATIVA al FOV
+    ax, ay = obs["agent_pos"]
+
+    # ricostruisco il minimo del FOV in coordinate globali
+    # (serve solo per mappare la trajectory)
+    fov_xmin = obs["fov"][0][0]
+    fov_ymin = obs["fov"][0][1]
+
+    for x, y in obs["trajectory"]:
+        rx = x - fov_xmin
+        ry = y - fov_ymin
+        if 0 <= rx < fov_w and 0 <= ry < fov_h:
+            traj_map[ry, rx] = 1.0
+
+    # --- Obstacle map ---
+    obstacle_map = obs["obstacles"].astype(np.float32)
+
+    # --- Traffic lights map ---
+    # normalize: 0–3 → 0–1
+    traffic_map = obs["traffic_lights"].astype(np.float32) / 3.0
+
+    # --- Agent position ---
+    agent_pos = np.array([ax, ay], dtype=np.float32)
+    # agent_rel = np.array([obs['agent_pos'][0] - fov_xmin, obs['agent_pos'][1] - fov_ymin], dtype=np.float32) # agent relative position in fov
+
+    # --- Flatten ---
+    return np.concatenate([
+        traj_map.flatten(),
+        obstacle_map.flatten(),
+        traffic_map.flatten(),
+        agent_pos
+    ])
+
 
 def train():
     env = PathEnv(grid_size=(GRID_W, GRID_H), path=SIMPLE_PATH, fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TRAIN)
