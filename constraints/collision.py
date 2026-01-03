@@ -9,7 +9,8 @@ class CollisionConstraint(Constraint):
         ax, ay = state["agent_pos"]
         obstacle_map = state["map"].obstacles
 
-        if obstacle_map[ay, ax] == 1:
+        if obstacle_map[ax, ay] == 1:
+            #print("COLLISION WITH OBSTACLE IN [", ay, ax,"]")
             return self.penalty
         else:
             return 0.0

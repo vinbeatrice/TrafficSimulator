@@ -10,7 +10,7 @@ class TrafficLightState(Enum):
 class TrafficLight:
     """A traffic light is defined by the duration of green and red phases and its initial state.
        We change its color based on the step count."""
-    def __init__(self, green_duration=GREEN_PHASE, yellow_duration=YELLOW_PHASE, red_duration=RED_PHASE, initial_state=TrafficLightState.RED):
+    def __init__(self, green_duration=GREEN_PHASE, yellow_duration=YELLOW_PHASE, red_duration=RED_PHASE, initial_state=TrafficLightState.GREEN):
         self.green_duration = green_duration
         self.yellow_duration = yellow_duration
         self.red_duration = red_duration

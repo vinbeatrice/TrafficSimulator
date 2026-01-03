@@ -11,13 +11,13 @@ from constraints.traffic_light import TrafficLightConstraint
 from env.maps import GridMap, TrafficLight, TrafficLightState
 
 from config.env_config import RED_PHASE, GREEN_PHASE, YELLOW_PHASE
-from config.penalty_config import COLLISION_PENALTY, TRAFFIC_LIGHT_PENALTY
+from config.penalty_config import COLLISION_PENALTY, TRAFFIC_LIGHT_PENALTY, USELESS_STEP_PENALTY
 from utils.helpers import getFOV, getTrajectoryinFOV, getFOV_with_layers
 
 """A simple Gym environment where an agent must learn to follow a chosen path on a 2D grid.
    - Skill: Follow a predefined path on a grid without deviations
    - Information: Agent position, agent's field of view (FOV), path trajectory into the FOV
-   - Actions: Move up, down, left, or right
+   - Actions: Move up, down, left, right or stay still
    - Success: Reach the end of the path without deviating
    - End: When agent reaches the end of the path (or optional time limit)
 """
@@ -27,6 +27,7 @@ class Actions(Enum):
     UP = 1
     LEFT = 2
     DOWN = 3
+    STAY = 4
 
 
 class PathEnv(gym.Env):
@@ -75,7 +76,7 @@ class PathEnv(gym.Env):
         # Define observation space
         self.observation_space = gym.spaces.Dict(
             {
-                "agent_pos": gym.spaces.Box(low=0, high=np.array([self.W-1, self.H-1]), shape=(2,), dtype=np.int32),  # array [x,y]
+                "fov": gym.spaces.Box(low=0, high=max(self.W, self.H), shape=(2, 2), dtype=np.int32), # [[xmin, ymin], [xmax, ymax]]
                 "trajectory": gym.spaces.Sequence(gym.spaces.MultiDiscrete([self.W, self.H])), # portion of path within FOV
                 "obstacles": spaces.Box(low=0, high=1, shape=(self.fov_h, self.fov_w), dtype=np.int8), #obstacles layer (0=free, 1=obstacle)
                 "traffic_lights": spaces.Box(low=0, high=3, shape=(self.fov_h, self.fov_w), dtype=np.int8) # traffic lights layer (0=none, 1=green, 2=yellow, 3=red)
@@ -83,13 +84,14 @@ class PathEnv(gym.Env):
         )
 
         # Define actions
-        self.action_space = spaces.Discrete(4)  # right, up, left, down
+        self.action_space = spaces.Discrete(5)  # right, up, left, down, stay
 
         self._action_to_direction = {
             Actions.RIGHT.value: np.array([0, 1]),   # col + 1
             Actions.LEFT.value:  np.array([0, -1]),  # col - 1
             Actions.UP.value:    np.array([-1, 0]),  # row - 1
             Actions.DOWN.value:  np.array([1, 0]),   # row + 1
+            Actions.STAY.value:  np.array([0, 0])
         }
 
 
@@ -116,8 +118,9 @@ class PathEnv(gym.Env):
            - obstacles visible in fov
            - traffic lights visible in fov
         """
+        fov = getFOV(agent_pos=self.agent_pos, fov_h=self.fov_h, fov_w=self.fov_w, grid_h=self.map.H, grid_w=self.map.W)
         return {
-            "agent_pos": self.agent_pos,
+            "fov": np.array(fov, dtype=np.int32),
             "trajectory": self.trajectory_in_fov,
             "obstacles": self.fov_data["obstacles"],
             "traffic_lights": self.fov_data["traffic_lights"]
@@ -162,11 +165,11 @@ class PathEnv(gym.Env):
         """Execute one timestep within the environment.
 
         Args:
-            action: The action to take (0-3 for directions)
+            action: The action to take (0-4 for directions)
         Returns:
             tuple: (observation, reward, terminated, truncated, info)
         """
-        # Map the discrete action (0-3) to a movement direction
+        # Map the discrete action (0-4) to a movement direction
         direction = self._action_to_direction[action]
 
         # Update agent position
@@ -187,15 +190,15 @@ class PathEnv(gym.Env):
             idx = self.path.index(new_pos_tuple)
             if idx >= self.path_index:
                 self.path_index = idx + 1
-                reward += 1.0
+                reward += 2.0
             else:
-                reward += -1.0
+                reward += USELESS_STEP_PENALTY
             if self.path_index >= len(self.path): # reached the end of the path
                 terminated = True
             #print("Advanced!")
         # Negative reward if agent deviates from the path
         else:
-            reward += -1.0
+            reward += USELESS_STEP_PENALTY
             #print("Wrong direction!")
             #print("Should go in ", self.path[self.path_index])
 
