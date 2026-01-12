@@ -18,5 +18,6 @@ class TrafficLightConstraint(Constraint):
             light = self.traffic_lights[agent_pos]
             #print("[STEP ", step_count, "] " "LA LUCE è: ", light.get_state(step_count), "IN POSIZIONE ", agent_pos, " --> ", (light.get_state(step_count)==TrafficLightState.RED))
             if light.get_state(step_count)==TrafficLightState.RED:
+                #print("TRAFFIC LIGHT VIOLATED")
                 return TRAFFIC_LIGHT_PENALTY
         return 0.0

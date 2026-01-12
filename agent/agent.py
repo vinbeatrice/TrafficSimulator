@@ -42,8 +42,10 @@ class DQNAgent:
         self.gamma = gamma
         self.epsilon = initial_epsilon
         self.epsilon_decay = epsilon_decay
+        print("EPSILON DECAY: ", self.epsilon_decay, " AND ", EPSILON_DECAY)
         self.initial_epsilon = initial_epsilon
         self.final_epsilon = final_epsilon
+        self.epsilon_step = (self.initial_epsilon - self.final_epsilon) / self.epsilon_decay
         self.discount_factor = discount_factor
         self.n_obs = n_obs
         self.n_actions = n_actions
@@ -54,7 +56,7 @@ class DQNAgent:
         self.policy_net = DQNNet(n_obs, n_actions).to(self.device) # policy network
         self.target_net = DQNNet(n_obs, n_actions).to(self.device) # target network
         self.target_net.load_state_dict(self.policy_net.state_dict()) # initialize target with policy weights
-        #self.target_net.eval()
+        self.target_net.eval()
 
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.lr)
         self.buffer = ReplayBuffer(capacity=buffer_size)
@@ -62,8 +64,14 @@ class DQNAgent:
     # Select next action given current state
     def select_action(self, state):
         self.step_count += 1
-        self.epsilon = self.final_epsilon + (self.initial_epsilon - self.final_epsilon) * \
-                np.exp(-1. * self.step_count / self.epsilon_decay)
+        #self.epsilon = self.final_epsilon + (self.initial_epsilon - self.final_epsilon) * \
+                #np.exp(-1. * self.step_count / self.epsilon_decay)
+        #self.epsilon_decay = INITIAL_EPSILON / (NUM_EPISODES)
+        #self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
+        #self.epsilon = max(self.final_epsilon, self.initial_epsilon - self.step_count / EPSILON_DECAY)
+        if self.epsilon > self.final_epsilon:
+            self.epsilon -= self.epsilon_step
+            self.epsilon = max(self.epsilon, self.final_epsilon)
 
         if np.random.rand() < self.epsilon: # exploration
             return np.random.randint(0,self.n_actions - 1)

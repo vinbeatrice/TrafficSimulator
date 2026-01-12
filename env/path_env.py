@@ -8,10 +8,11 @@ from enum import Enum
 from constraints.reward_manager import RewardManager
 from constraints.collision import CollisionConstraint
 from constraints.traffic_light import TrafficLightConstraint
+from constraints.right_lane import RightLaneConstraint
 from env.maps import GridMap, TrafficLight, TrafficLightState
 
 from config.env_config import RED_PHASE, GREEN_PHASE, YELLOW_PHASE
-from config.penalty_config import COLLISION_PENALTY, TRAFFIC_LIGHT_PENALTY, USELESS_STEP_PENALTY
+from config.penalty_config import COLLISION_PENALTY, TRAFFIC_LIGHT_PENALTY, LANE_PENALTY, USELESS_STEP_PENALTY
 from utils.helpers import getFOV, getTrajectoryinFOV, getFOV_with_layers
 
 """A simple Gym environment where an agent must learn to follow a chosen path on a 2D grid.
@@ -57,6 +58,7 @@ class PathEnv(gym.Env):
         self.path = [tuple(p) for p in path]  # keep path as list of tuples
     
         self.agent_pos = np.array(self.path[0], dtype=np.int32)  # array([x, y])
+        self.agent_dir = None
         self.path_index = 1
         self.step_count = 0
         self.fov_w, self.fov_h = fov
@@ -67,6 +69,7 @@ class PathEnv(gym.Env):
         self.reward_manager = RewardManager()
         self.reward_manager.add_constraint(CollisionConstraint(penalty=COLLISION_PENALTY))
         self.reward_manager.add_constraint(TrafficLightConstraint(penalty=TRAFFIC_LIGHT_PENALTY, traffic_lights=self.traffic_lights))
+        self.reward_manager.add_constraint(RightLaneConstraint(penalty=LANE_PENALTY))
 
 
 
@@ -79,7 +82,8 @@ class PathEnv(gym.Env):
                 "fov": gym.spaces.Box(low=0, high=max(self.W, self.H), shape=(2, 2), dtype=np.int32), # [[xmin, ymin], [xmax, ymax]]
                 "trajectory": gym.spaces.Sequence(gym.spaces.MultiDiscrete([self.W, self.H])), # portion of path within FOV
                 "obstacles": spaces.Box(low=0, high=1, shape=(self.fov_h, self.fov_w), dtype=np.int8), #obstacles layer (0=free, 1=obstacle)
-                "traffic_lights": spaces.Box(low=0, high=3, shape=(self.fov_h, self.fov_w), dtype=np.int8) # traffic lights layer (0=none, 1=green, 2=yellow, 3=red)
+                "traffic_lights": spaces.Box(low=0, high=3, shape=(self.fov_h, self.fov_w), dtype=np.int8), # traffic lights layer (0=none, 1=green, 2=yellow, 3=red)
+                "borders": spaces.Box(low=0, high=3, shape=(self.fov_h, self.fov_w), dtype=np.int8) # road borders layer (0=road, 1=border)
             }
         )
 
@@ -123,12 +127,14 @@ class PathEnv(gym.Env):
             "fov": np.array(fov, dtype=np.int32),
             "trajectory": self.trajectory_in_fov,
             "obstacles": self.fov_data["obstacles"],
-            "traffic_lights": self.fov_data["traffic_lights"]
+            "traffic_lights": self.fov_data["traffic_lights"],
+            "borders": self.fov_data["borders"]
         }
     
     def _get_state(self):
         return {
             "agent_pos": (int(self.agent_pos[0]), int(self.agent_pos[1])),
+            "agent_dir": self.agent_dir,
             "step_count": self.step_count,
             "map": self.map
         }
@@ -146,9 +152,30 @@ class PathEnv(gym.Env):
         # IMPORTANT: Must call this first to seed the random number generator
         super().reset(seed=seed)
 
+        # Reset agent position
         self.agent_pos = np.array(self.path[0], dtype=np.int32)
+
+        # Reset agent direction
+        if len(self.path) > 1:
+            dx = self.path[1][0] - self.path[0][0] 
+            dy = self.path[1][1] - self.path[0][1]
+
+            if dx == -1 and dy == 0:
+                self.agent_dir = 'UP'
+            elif dx == 1 and dy == 0:
+                self.agent_dir = 'DOWN'
+            elif dx == 0 and dy == 1:
+                self.agent_dir = 'RIGHT'
+            elif dx == 0 and dy == -1:
+                self.agent_dir = 'LEFT'
+            else:
+                raise ValueError(
+                    f"Invalid initial movement from {self.path[0]} to {self.path[1]}"
+                )
+
         self.path_index = 1
         self.step_count = 0
+        self.idle_steps = 0
         self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
         self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path)
 
@@ -172,10 +199,21 @@ class PathEnv(gym.Env):
         # Map the discrete action (0-4) to a movement direction
         direction = self._action_to_direction[action]
 
-        # Update agent position
+        # Update agent position and direction
         new_pos = self.agent_pos + direction
         new_pos = np.clip(new_pos, [0, 0], [self.W - 1, self.H - 1]).astype(np.int32) # Ensure agent stays within grid bounds
         self.agent_pos = new_pos
+
+        if action == Actions.RIGHT.value:
+            self.agent_dir = 'RIGHT'
+        elif action == Actions.LEFT.value:
+            self.agent_dir = 'LEFT'
+        elif action == Actions.DOWN.value:
+            self.agent_dir = 'DOWN'
+        elif action == Actions.UP.value:
+            self.agent_dir = 'UP'
+        else: # STAY
+            pass
 
         # Update FOV and trajectory in FOV
         self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
@@ -190,7 +228,7 @@ class PathEnv(gym.Env):
             idx = self.path.index(new_pos_tuple)
             if idx >= self.path_index:
                 self.path_index = idx + 1
-                reward += 2.0
+                reward += 1.5
             else:
                 reward += USELESS_STEP_PENALTY
             if self.path_index >= len(self.path): # reached the end of the path
@@ -201,6 +239,10 @@ class PathEnv(gym.Env):
             reward += USELESS_STEP_PENALTY
             #print("Wrong direction!")
             #print("Should go in ", self.path[self.path_index])
+        
+        self.idle_steps += 1 if action == Actions.STAY.value else 0
+        reward -= 0.1 * self.idle_steps
+
 
         self.step_count += 1
 

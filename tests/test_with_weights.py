@@ -7,14 +7,13 @@ from agent.dqn_model import DQNNet
 from env.maps import GridMap
 from config.env_config import FOV_H, FOV_W, RENDER_MODE_TEST, MAX_STEPS
 from config.paths import TEST_PATH
-from config.train_config import OBSTACLE_MAP, TL_MAP, SAVE_PATH
+from config.train_config import OBSTACLE_MAP, TL_MAP, BOARDERS, SAVE_PATH
 from config.agent_config import N_CHANNELS, N_ACTIONS
-
 
 # --- Config ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-map = GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP)
+map = GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP, road_border_map=BOARDERS)
 env = PathEnv(grid_map=map, path=TEST_PATH, fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TEST, max_steps=MAX_STEPS)
 obs, _ = env.reset()
 

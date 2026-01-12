@@ -40,14 +40,18 @@ class TrafficLight:
 class GridMap:
     """Map interpreted as set of layers."""
 
-    def __init__(self, obstacle_map: np.array, traffic_light_map: np.array):
+    def __init__(self, obstacle_map: np.array, traffic_light_map: np.array, road_border_map: np.array):
         """Obstacle_map is an array of size (W,H) and each cell has value:
             - 1 if there's an obstacle (still car, buildings ecc.)
             - 0 if it is free
 
-            Traffic_light_map is also an array of the same size where each celle has value:
+            Traffic_light_map is also an array of the same size where each cell has value:
             - 1 if there's a traffic light
             - 0 if there's no traffic light
+
+            Road_border_map is an array of the same size where each ceel has value:
+            - 1 if it is the border of a road
+            - 0 if it is the road itself
         """
         # !!!!Aggiungere controlli sul not None
 
@@ -60,4 +64,9 @@ class GridMap:
         assert traffic_light_map.shape == (self.H, self.W) # check size
 
         self.traffic_lights = traffic_light_map
+
+        assert road_border_map.ndim == 2 # check dimension
+        assert road_border_map.shape == (self.H, self.W) # check size
+
+        self.borders = road_border_map
 

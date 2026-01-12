@@ -18,25 +18,31 @@ def getFOV_with_layers(
 
     obstacles = np.zeros((fov_h, fov_w), dtype=np.float32)
     traffic = np.zeros((fov_h, fov_w), dtype=np.float32)
+    borders = np.zeros((fov_h, fov_w), dtype=np.float32)
 
     for x in range(xmin, xmax + 1):
         for y in range(ymin, ymax + 1):
             rx, ry = x - xmin, y - ymin
 
-            # ostacoli
+            # obstacles
             if grid_map.obstacles[x, y] == 1:
                 obstacles[ry, rx] = 1.0
 
-            # semafori
+            # traffic lights
             if (x, y) in traffic_lights:
                 state = traffic_lights[(x, y)].get_state(step_count)
                 traffic[ry, rx] = state.value + 1
+
+            # ostacoli
+            if grid_map.borders[x, y] == 1:
+                obstacles[ry, rx] = 1.0
 
     agent_rel = np.array([ax - xmin, ay - ymin], dtype=np.float32)
 
     return {
         "obstacles": obstacles,
         "traffic_lights": traffic,
+        "borders": borders,
         "agent_pos": agent_rel,
         "fov_bounds": ((xmin, ymin), (xmax, ymax))
     }

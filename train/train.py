@@ -4,7 +4,7 @@ from env.path_env import PathEnv
 from agent.agent import DQNAgent
 from env.maps import GridMap
 from config.env_config import FOV_W, FOV_H, MAX_STEPS, RENDER_MODE_TRAIN
-from config.train_config import NUM_EPISODES, GAMMA, BATCH_SIZE, SAVE_PATH, OBSTACLE_MAP, TL_MAP
+from config.train_config import NUM_EPISODES, GAMMA, BATCH_SIZE, SAVE_PATH, OBSTACLE_MAP, TL_MAP, BOARDERS, TARGET_UPDATE_FREQ
 from config.agent_config import INITIAL_EPSILON, FINAL_EPSILON, EPSILON_DECAY, N_CHANNELS
 from config.paths import TEST_PATH
 
@@ -33,6 +33,9 @@ def obs_to_array(obs, fov_h=FOV_H, fov_w=FOV_W):
     # --- Obstacle map ---
     obstacle_map = obs["obstacles"].astype(np.float32)
 
+    # --- Road Borders map ---
+    border_map = obs["borders"].astype(np.float32)
+
     # --- Traffic lights map ---
     # normalize: 0–3 → 0–1
     traffic_map = obs["traffic_lights"].astype(np.float32) / 3.0
@@ -41,18 +44,19 @@ def obs_to_array(obs, fov_h=FOV_H, fov_w=FOV_W):
     return np.concatenate([
         traj_map.flatten(),
         obstacle_map.flatten(),
+        border_map.flatten(),
         traffic_map.flatten()
     ])
 
 
 def train():
-    env = PathEnv(grid_map=GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP), path=TEST_PATH, fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TRAIN, max_steps=MAX_STEPS)
+    env = PathEnv(grid_map=GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP, road_border_map=BOARDERS), path=TEST_PATH, fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TRAIN, max_steps=MAX_STEPS)
     print("[INFO] Environment created.")
     obs, _ = env.reset()
 
     n_obs = FOV_W * FOV_H * N_CHANNELS  # trajectory map + obstacle map + traffic lights map
     n_actions = env.action_space.n
-    agent = DQNAgent(env=env, n_obs=n_obs, n_actions=n_actions,learning_rate=1e-3, gamma=GAMMA, initial_epsilon=INITIAL_EPSILON, final_epsilon=FINAL_EPSILON, epsilon_decay=EPSILON_DECAY)
+    agent = DQNAgent(env=env, n_obs=n_obs, n_actions=n_actions,learning_rate=1e-3, gamma=GAMMA, initial_epsilon=INITIAL_EPSILON, final_epsilon=FINAL_EPSILON)
     print("[INFO] Agent created.")
 
     n_episodes = NUM_EPISODES
@@ -72,6 +76,8 @@ def train():
             total_reward += reward
             if done or truncated:
                 break
+        if ep % TARGET_UPDATE_FREQ == 0:
+            agent.update_target()
         print(f"Episode {ep} - Total reward: {total_reward} - Epsilon value: {agent.epsilon}")
     
     torch.save(
