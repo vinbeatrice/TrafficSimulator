@@ -4,7 +4,7 @@
 FOV_W = 3
 FOV_H = 3
 
-MAX_STEPS = 30
+MAX_STEPS = 150
 
 # Rendering options
 RENDER_MODE_TRAIN = None

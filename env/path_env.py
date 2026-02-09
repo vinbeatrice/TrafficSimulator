@@ -8,8 +8,12 @@ from enum import Enum
 from constraints.reward_manager import RewardManager
 from constraints.collision import CollisionConstraint
 from constraints.traffic_light import TrafficLightConstraint
-from constraints.right_lane import RightLaneConstraint
+#from constraints.right_lane import RightLaneConstraint
+#from constraints.one_way import OneWayConstraint
+#from constraints.old_direction import DirectionConstraint
+from constraints.allowed_direction import AllowedDirectionConstraint
 from env.maps import GridMap, TrafficLight, TrafficLightState
+from env.directions import Direction
 
 from config.env_config import RED_PHASE, GREEN_PHASE, YELLOW_PHASE
 from config.penalty_config import COLLISION_PENALTY, TRAFFIC_LIGHT_PENALTY, LANE_PENALTY, USELESS_STEP_PENALTY
@@ -60,16 +64,20 @@ class PathEnv(gym.Env):
         self.agent_pos = np.array(self.path[0], dtype=np.int32)  # array([x, y])
         self.agent_dir = None
         self.path_index = 1
+        self.path_index_map = {pos: i for i, pos in enumerate(self.path)} #{position → path index}
         self.step_count = 0
         self.fov_w, self.fov_h = fov
-        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
-        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path)
+        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, agent_dir=Direction.UP, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
+        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, start_idx=self.path_index)
         
         # ---------- CONSTRAINTS ----------
         self.reward_manager = RewardManager()
         self.reward_manager.add_constraint(CollisionConstraint(penalty=COLLISION_PENALTY))
         self.reward_manager.add_constraint(TrafficLightConstraint(penalty=TRAFFIC_LIGHT_PENALTY, traffic_lights=self.traffic_lights))
-        self.reward_manager.add_constraint(RightLaneConstraint(penalty=LANE_PENALTY))
+        #self.reward_manager.add_constraint(RightLaneConstraint(penalty=LANE_PENALTY))
+        #self.reward_manager.add_constraint(OneWayConstraint(penalty=LANE_PENALTY))
+        #self.reward_manager.add_constraint(DirectionConstraint(penalty=LANE_PENALTY))
+        self.reward_manager.add_constraint(AllowedDirectionConstraint(penalty=LANE_PENALTY))
 
 
 
@@ -83,7 +91,9 @@ class PathEnv(gym.Env):
                 "trajectory": gym.spaces.Sequence(gym.spaces.MultiDiscrete([self.W, self.H])), # portion of path within FOV
                 "obstacles": spaces.Box(low=0, high=1, shape=(self.fov_h, self.fov_w), dtype=np.int8), #obstacles layer (0=free, 1=obstacle)
                 "traffic_lights": spaces.Box(low=0, high=3, shape=(self.fov_h, self.fov_w), dtype=np.int8), # traffic lights layer (0=none, 1=green, 2=yellow, 3=red)
-                "borders": spaces.Box(low=0, high=3, shape=(self.fov_h, self.fov_w), dtype=np.int8) # road borders layer (0=road, 1=border)
+                #"borders": spaces.Box(low=0, high=5, shape=(self.fov_h, self.fov_w), dtype=np.int8) # road borders layer (0=road, 1=border double direction, 2=border UP, 3=border DOWN, 4=border LEFT. 5=border RIGHT)
+                #"one_way_borders": spaces.Box(low=0, high=4, shape=(self.fov_h, self.fov_w), dtype=np.int8) # one way road borders layer (0=road, 1=border UP, 2=border DOWN, 3=border LEFT. 4=border RIGHT)
+                "allowed_dirs": spaces.Box(low=0, high=15, shape=(self.fov_h, self.fov_w), dtype=np.int8)
             }
         )
 
@@ -121,6 +131,7 @@ class PathEnv(gym.Env):
            - portion of the path visible in fov
            - obstacles visible in fov
            - traffic lights visible in fov
+           - allowed directions in fov
         """
         fov = getFOV(agent_pos=self.agent_pos, fov_h=self.fov_h, fov_w=self.fov_w, grid_h=self.map.H, grid_w=self.map.W)
         return {
@@ -128,7 +139,7 @@ class PathEnv(gym.Env):
             "trajectory": self.trajectory_in_fov,
             "obstacles": self.fov_data["obstacles"],
             "traffic_lights": self.fov_data["traffic_lights"],
-            "borders": self.fov_data["borders"]
+            "allowed_dirs": self.fov_data["allowed_dirs"]
         }
     
     def _get_state(self):
@@ -161,13 +172,13 @@ class PathEnv(gym.Env):
             dy = self.path[1][1] - self.path[0][1]
 
             if dx == -1 and dy == 0:
-                self.agent_dir = 'UP'
+                self.agent_dir = Direction.UP
             elif dx == 1 and dy == 0:
-                self.agent_dir = 'DOWN'
+                self.agent_dir = Direction.DOWN
             elif dx == 0 and dy == 1:
-                self.agent_dir = 'RIGHT'
+                self.agent_dir = Direction.RIGHT
             elif dx == 0 and dy == -1:
-                self.agent_dir = 'LEFT'
+                self.agent_dir = Direction.LEFT
             else:
                 raise ValueError(
                     f"Invalid initial movement from {self.path[0]} to {self.path[1]}"
@@ -176,8 +187,8 @@ class PathEnv(gym.Env):
         self.path_index = 1
         self.step_count = 0
         self.idle_steps = 0
-        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
-        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path)
+        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, agent_dir=self.agent_dir, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
+        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, start_idx=self.path_index)
 
         observation = self._get_obs()
         info = {} # not defined _get_info()
@@ -205,52 +216,55 @@ class PathEnv(gym.Env):
         self.agent_pos = new_pos
 
         if action == Actions.RIGHT.value:
-            self.agent_dir = 'RIGHT'
+            self.agent_dir = Direction.RIGHT
         elif action == Actions.LEFT.value:
-            self.agent_dir = 'LEFT'
+            self.agent_dir = Direction.LEFT
         elif action == Actions.DOWN.value:
-            self.agent_dir = 'DOWN'
+            self.agent_dir = Direction.DOWN
         elif action == Actions.UP.value:
-            self.agent_dir = 'UP'
+            self.agent_dir = Direction.UP
         else: # STAY
             pass
 
         # Update FOV and trajectory in FOV
-        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
-        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path)
+        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, agent_dir=self.agent_dir, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
+        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, start_idx=self.path_index)
 
         terminated = False
         new_pos_tuple = (int(new_pos[0]), int(new_pos[1])) # convert to tuple for comparison
 
+        
         reward = 0.0
-        # Positive reward if agent has advanced on the path
-        if new_pos_tuple in self.path:
-            idx = self.path.index(new_pos_tuple)
+
+        idx = self.path_index_map.get(new_pos_tuple, -1) # agent position on the path
+
+        if idx != -1: # position in path
             if idx >= self.path_index:
                 self.path_index = idx + 1
-                reward += 1.5
-            else:
+                reward += 3.0
+            else: # not advanced
                 reward += USELESS_STEP_PENALTY
-            if self.path_index >= len(self.path): # reached the end of the path
+
+            if self.path_index >= len(self.path):
+                reward += 20.0
                 terminated = True
-            #print("Advanced!")
-        # Negative reward if agent deviates from the path
-        else:
+        else: # position not in path
             reward += USELESS_STEP_PENALTY
-            #print("Wrong direction!")
-            #print("Should go in ", self.path[self.path_index])
         
         self.idle_steps += 1 if action == Actions.STAY.value else 0
-        reward -= 0.1 * self.idle_steps
+        if action == Actions.STAY.value:
+            reward = -0.5
 
 
         self.step_count += 1
 
         # Apply pernalty for violations
         state = self._get_state()
-        penalty = self.reward_manager.evaluate(state)
+        penalty, constr_termination = self.reward_manager.evaluate(state)
         reward += penalty
 
+        if constr_termination:
+            terminated = True
 
         truncated = False
         if self.step_count >= self.max_steps: # exceeded max steps
@@ -264,7 +278,8 @@ class PathEnv(gym.Env):
         
         return observation, reward, terminated, truncated, info
     
-    
+    def setPath(self, path):
+        self.path = path
 
     def render(self):
         if self.render_mode == "rgb_array":
@@ -290,7 +305,7 @@ class PathEnv(gym.Env):
         for (y, x) in self.path:
             pygame.draw.rect(
                 canvas,
-                (200, 200, 200),
+                (160, 32, 240),
                 pygame.Rect(
                     x * pix_square_size,
                     y * pix_square_size,

@@ -9,6 +9,7 @@ from config.paths import PROVA
 def main():
     # --- Grid ---
     W, H = 5, 5
+    road_border_map = np.zeros((H, W), dtype=np.int32)
     obstacle_map = np.zeros((H, W), dtype=np.int8)
     traffic_light_map = np.zeros((H, W), dtype=np.int8)
 
@@ -24,7 +25,8 @@ def main():
 
     grid_map = GridMap(
         obstacle_map=obstacle_map,
-        traffic_light_map=traffic_light_map
+        traffic_light_map=traffic_light_map,
+        road_border_map=road_border_map
     )
 
     # --- Path (sale dritto) ---

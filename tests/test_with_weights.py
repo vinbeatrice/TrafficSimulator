@@ -1,4 +1,5 @@
 import torch
+import time
 import numpy as np
 from env.path_env import PathEnv
 from train.train import obs_to_array
@@ -7,24 +8,32 @@ from agent.dqn_model import DQNNet
 from env.maps import GridMap
 from config.env_config import FOV_H, FOV_W, RENDER_MODE_TEST, MAX_STEPS
 from config.paths import TEST_PATH
-from config.train_config import OBSTACLE_MAP, TL_MAP, BOARDERS, SAVE_PATH
+from config.train_config import OBSTACLE_MAP, TL_MAP, DIRECTION_MAP, SAVE_PATH
 from config.agent_config import N_CHANNELS, N_ACTIONS
 
 # --- Config ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-map = GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP, road_border_map=BOARDERS)
+map = GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP, direction_map=DIRECTION_MAP)
 env = PathEnv(grid_map=map, path=TEST_PATH, fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TEST, max_steps=MAX_STEPS)
+print("ENV creato")
 obs, _ = env.reset()
 
 # --- Inizializza rete e carica pesi ---
 input_dim = FOV_W * FOV_H * N_CHANNELS
 n_actions = N_ACTIONS
+"""
 agent = DQNAgent(env=env,n_obs=input_dim, n_actions=n_actions)
 policy_net = DQNNet(n_obs=input_dim, n_actions=n_actions).to(agent.device)
 policy_net.load_state_dict(torch.load(SAVE_PATH, map_location=device))
 policy_net.eval()
+"""
+agent = DQNAgent(env=env, n_obs=input_dim, n_actions=n_actions)
+agent.policy_net.load_state_dict(torch.load(SAVE_PATH, map_location=device))
+agent.policy_net.eval()
+agent.epsilon = 0.0
 
+tot = 0
 done = False
 step = 0
 while not done:
@@ -32,12 +41,17 @@ while not done:
     state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        q_values = policy_net(state_tensor)
-        action = int(q_values.argmax().item())
+        action = agent.policy_net(state_tensor).argmax().item()
+
 
     obs, reward, terminated, truncated, info = env.step(action)
+    tot += reward
+    print("[STEP ",step, "] ACTION", action, "REWARD: ", reward," DONE: ", terminated or truncated)
+    #print(obs)
+    time.sleep(0.6)
     step += 1
     done = terminated or truncated
-    print("[STEP ",step, "] ACTION", action, "REWARD: ", reward," DONE: ", done)
+
+print("TOTAL: ", tot)
 
 env.close()

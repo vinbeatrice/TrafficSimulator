@@ -5,6 +5,7 @@ from env.path_env import PathEnv
 from config.paths import SIMPLE_PATH
 from config.env_config import FOV_H, FOV_W, RENDER_MODE_TEST
 
+road_border_map = np.zeros((5, 5), dtype=np.int32)
 obstacle_map = np.zeros((5, 5), dtype=np.int32)
 obstacle_map[0, 2] = 1
 obstacle_map[0, 3] = 1
@@ -21,7 +22,7 @@ traffic_light_map = np.zeros((5, 5), dtype=np.int32)
 # 0 0 0 0 0
 # 0 0 0 0 0
 
-grid_map = GridMap(obstacle_map, traffic_light_map)
+grid_map = GridMap(obstacle_map, traffic_light_map, road_border_map)
 path = [(2,0),(2,1),(2,2),(2,3),(2,4)]
 
 env = PathEnv(
@@ -39,8 +40,8 @@ actions = [0, 3, 0, 3, 0, 0]
 try:
     for step_idx, a in enumerate(actions):
         obs, reward, terminated, truncated, info = env.step(a)
-        ay, ax = obs["agent_pos"]
-        print("   agent_pos: [", ax, ",", ay, "]")
+        #ay, ax = obs["agent_pos"]
+        #print("   agent_pos: [", ax, ",", ay, "]")
         print("   reward:", reward)
 
         # Wait a bit to visualize

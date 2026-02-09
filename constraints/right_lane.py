@@ -44,13 +44,13 @@ class RightLaneConstraint(Constraint):
 
         # --- BOUNDARY CHECK ---
         if not (0 <= check_pos[0] < H and 0 <= check_pos[1] < W):
-            # Sei fuori strada → penalità
+            # Out of road → penalty
+            #print("Right Lane violation, agento position ", check_pos)
             return self.penalty
 
         # --- ROAD BORDER CHECK ---
         if border_map[check_pos] == 0:
+            #print("Right Lane violation, agento position ", check_pos)
             return self.penalty
 
         return 0.0
-    
-        return 0

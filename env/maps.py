@@ -3,9 +3,9 @@ from enum import Enum
 from config.env_config import RED_PHASE, GREEN_PHASE, YELLOW_PHASE
 
 class TrafficLightState(Enum):
-    GREEN = 0
-    YELLOW = 1
-    RED = 2
+    GREEN = 1
+    YELLOW = 2
+    RED = 3
     
 class TrafficLight:
     """A traffic light is defined by the duration of green and red phases and its initial state.
@@ -35,12 +35,31 @@ class TrafficLight:
                 return TrafficLightState.GREEN
             else:
                 return TrafficLightState.YELLOW
+    
+    def isRed(self, step_count: int):
+        t = step_count % self.cycle
+
+        if self.initial_state == TrafficLightState.GREEN:
+            if t < self.green_duration:
+                return False
+            elif t < self.green_duration + self.yellow_duration:
+                return False
+            else:
+                return True
+
+        elif self.initial_state == TrafficLightState.RED:
+            if t < self.red_duration:
+                return True
+            elif t < self.red_duration + self.green_duration:
+                return False
+            else:
+                return False
 
 
 class GridMap:
     """Map interpreted as set of layers."""
 
-    def __init__(self, obstacle_map: np.array, traffic_light_map: np.array, road_border_map: np.array):
+    def __init__(self, obstacle_map: np.array, traffic_light_map: np.array, direction_map: np.array):
         """Obstacle_map is an array of size (W,H) and each cell has value:
             - 1 if there's an obstacle (still car, buildings ecc.)
             - 0 if it is free
@@ -49,9 +68,16 @@ class GridMap:
             - 1 if there's a traffic light
             - 0 if there's no traffic light
 
-            Road_border_map is an array of the same size where each ceel has value:
+            Direction_map is an array of the same size where each cell has value:
             - 1 if it is the border of a road
             - 0 if it is the road itself
+
+            Direction_map is similar to road_border_map but is refered to the border of one way roads. Each cell has value
+            - 0 if there is no border
+            - 1 if it is the border of a road with UP direction
+            - 2 if it is the border of a road with DOWN direction
+            - 3 if it is the border of a road with LEFT direction
+            - 4 if it is the border of a road with RIGHT direction
         """
         # !!!!Aggiungere controlli sul not None
 
@@ -65,8 +91,19 @@ class GridMap:
 
         self.traffic_lights = traffic_light_map
 
-        assert road_border_map.ndim == 2 # check dimension
-        assert road_border_map.shape == (self.H, self.W) # check size
+        assert direction_map.ndim == 2 # check dimension
+        assert direction_map.shape == (self.H, self.W) # check size
 
-        self.borders = road_border_map
+        self.direction_map = direction_map
 
+    def isObstacle(self, x: int, y: int):
+        return self.obstacles[x, y] != 0
+    
+    def isTrafficLight(self, pos):
+        x, y = pos
+        return self.traffic_lights[x, y] != 0
+    
+    def getAllowedDirections(self, pos):
+        x, y = pos
+        return self.direction_map[x, y]
+        

@@ -20,6 +20,9 @@ class RewardManager:
     
     def evaluate(self, state) -> float:
         penalty = 0.0
+        terminated = False
         for c in self.constraints:
-            penalty += c.check(state)
-        return penalty
+            p, t = c.check(state)
+            penalty += p
+            terminated = terminated or t
+        return penalty, terminated
