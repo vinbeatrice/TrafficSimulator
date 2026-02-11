@@ -29,7 +29,7 @@ def obs_to_array(obs, fov_h=FOV_H, fov_w=FOV_W):
     fov_xmin = obs["fov"][0][0]
     fov_ymin = obs["fov"][0][1]
 
-    for x, y in obs["trajectory"]:  # ← è una LISTA
+    for x, y in obs["trajectory"]:  # ← obs["trajectory"] is a list
         rx = x - fov_xmin
         ry = y - fov_ymin
         if 0 <= rx < fov_w and 0 <= ry < fov_h:
@@ -37,13 +37,6 @@ def obs_to_array(obs, fov_h=FOV_H, fov_w=FOV_W):
 
     # --- Obstacle map ---
     obstacle_map = obs["obstacles"].astype(np.float32)
-
-    # --- Road Borders map ---
-    #border_map = obs["borders"].astype(np.float32) / 5.0
-
-    # --- One Way Road Borders map ---
-    # normalize: 0–4 → 0–1
-    #one_way_border_map = obs["one_way_borders"].astype(np.float32) / 4.0
 
     # --- Traffic lights map ---
     # normalize: 0–3 → 0–1
@@ -55,8 +48,6 @@ def obs_to_array(obs, fov_h=FOV_H, fov_w=FOV_W):
     return np.concatenate([
         traj_map.flatten(),
         obstacle_map.flatten(),
-        #border_map.flatten(),
-        #one_way_border_map.flatten(),
         traffic_map.flatten(),
         allowed_dirs.flatten()
     ])

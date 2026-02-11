@@ -31,6 +31,7 @@ def getFOV_with_layers(
     Compute layers contained in fov based on current agent position and direction.
     """
 
+
     W, H = grid_map.W, grid_map.H
     ax, ay = agent_pos
 
@@ -51,7 +52,7 @@ def getFOV_with_layers(
             # obstacles
             if grid_map.obstacles[x, y] == 1:
                 obstacles[rx, ry] = 1.0
-
+            
             # traffic lights
             if (x, y) in traffic_lights:
                 state = traffic_lights[(x, y)].get_state(step_count)
@@ -110,7 +111,6 @@ def generate_random_path(
     """
 
     H, W = grid_map.H, grid_map.W
-    allowed_dirs = grid_map.direction_map
 
     # --- Pick random start if not provided ---
     if start is None:
@@ -118,7 +118,7 @@ def generate_random_path(
             (x, y)
             for x in range(H)
             for y in range(W)
-            if allowed_dirs[x, y] != 0
+            if grid_map.isRoad(x, y) and not grid_map.isObstacle(x, y)
         ]
         start = random.choice(candidates)
 
@@ -143,7 +143,7 @@ def generate_random_path(
                 continue
 
             # must be road
-            if allowed_dirs[nx, ny] == 0:
+            if not grid_map.isRoad(nx, ny):
                 continue
 
             # avoid loops

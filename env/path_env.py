@@ -17,6 +17,7 @@ from env.directions import Direction
 
 from config.env_config import RED_PHASE, GREEN_PHASE, YELLOW_PHASE
 from config.penalty_config import COLLISION_PENALTY, TRAFFIC_LIGHT_PENALTY, LANE_PENALTY, USELESS_STEP_PENALTY
+from config.traffic_lights import TL_GROUPS
 from utils.helpers import getFOV, getTrajectoryinFOV, getFOV_with_layers
 
 """A simple Gym environment where an agent must learn to follow a chosen path on a 2D grid.
@@ -49,11 +50,17 @@ class PathEnv(gym.Env):
         # create traffic lights dictionary
         self.traffic_lights = {}
 
-        for x in range (self.W):
+        for x in range(self.W):
             for y in range(self.H):
-                if self.map.traffic_lights[x][y]!=0:
-                    self.traffic_lights[(x,y)] = TrafficLight(green_duration=GREEN_PHASE, yellow_duration=YELLOW_PHASE, red_duration=RED_PHASE)
-
+                group_id = self.map.traffic_lights[x, y]
+                if group_id != 0:
+                    cfg = TL_GROUPS[group_id]
+                    self.traffic_lights[(x, y)] = TrafficLight(
+                        green_duration=cfg["green"],
+                        yellow_duration=cfg["yellow"],
+                        red_duration=cfg["red"],
+                        offset=cfg["offset"]
+                    )
 
         self.window_size = 512
 
@@ -74,9 +81,6 @@ class PathEnv(gym.Env):
         self.reward_manager = RewardManager()
         self.reward_manager.add_constraint(CollisionConstraint(penalty=COLLISION_PENALTY))
         self.reward_manager.add_constraint(TrafficLightConstraint(penalty=TRAFFIC_LIGHT_PENALTY, traffic_lights=self.traffic_lights))
-        #self.reward_manager.add_constraint(RightLaneConstraint(penalty=LANE_PENALTY))
-        #self.reward_manager.add_constraint(OneWayConstraint(penalty=LANE_PENALTY))
-        #self.reward_manager.add_constraint(DirectionConstraint(penalty=LANE_PENALTY))
         self.reward_manager.add_constraint(AllowedDirectionConstraint(penalty=LANE_PENALTY))
 
 
@@ -127,7 +131,6 @@ class PathEnv(gym.Env):
     def _get_obs(self):
         """The agent only knows what's inside its field of view, thus the observation
            will contain the following data:
-           - agent position
            - portion of the path visible in fov
            - obstacles visible in fov
            - traffic lights visible in fov
@@ -255,6 +258,8 @@ class PathEnv(gym.Env):
         if action == Actions.STAY.value:
             reward = -0.5
 
+        if self.render_mode == "human":
+            self._render_frame()
 
         self.step_count += 1
 
@@ -273,8 +278,6 @@ class PathEnv(gym.Env):
         observation = self._get_obs()
         info = {}
 
-        if self.render_mode == "human":
-            self._render_frame()
         
         return observation, reward, terminated, truncated, info
     
@@ -286,6 +289,7 @@ class PathEnv(gym.Env):
             return self._render_frame()
 
     def _render_frame(self):
+
         if self.window is None and self.render_mode == "human":
             pygame.init()
             pygame.display.init()
@@ -345,9 +349,9 @@ class PathEnv(gym.Env):
 
         # --- Draw traffic lights ---
         for (y, x), light in self.traffic_lights.items():
-            if light.get_state(self.step_count) == TrafficLightState.GREEN:
+            if light.isGreen(self.step_count):
                 color = (0, 200, 0)
-            elif light.get_state(self.step_count) == TrafficLightState.YELLOW:
+            elif light.isYellow(self.step_count):
                 color = (200, 200, 0)
             else:
                 color = (200, 0, 0)

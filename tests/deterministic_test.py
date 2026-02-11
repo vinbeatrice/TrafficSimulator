@@ -44,9 +44,18 @@ def test_right_lane_constraint():
         Actions.STAY.value,
         Actions.STAY.value,
         Actions.STAY.value,
+        Actions.STAY.value,
+        Actions.STAY.value,
         Actions.UP.value,
         Actions.UP.value,
         Actions.UP.value,
+        Actions.LEFT.value,
+        Actions.LEFT.value,
+        Actions.LEFT.value,
+        Actions.LEFT.value,
+        Actions.STAY.value,
+        Actions.LEFT.value,
+        Actions.LEFT.value,
         Actions.LEFT.value,
         Actions.LEFT.value,
         Actions.LEFT.value,
@@ -60,12 +69,13 @@ def test_right_lane_constraint():
         Actions.LEFT.value,
         Actions.LEFT.value,
         Actions.LEFT.value,
-        Actions.LEFT.value,
-        Actions.LEFT.value,
-        Actions.LEFT.value,
-        Actions.LEFT.value,
-        Actions.LEFT.value,
-        Actions.LEFT.value,
+        Actions.STAY.value,
+        Actions.STAY.value,
+        Actions.STAY.value,
+        Actions.STAY.value,
+        Actions.STAY.value,
+        Actions.STAY.value,
+        Actions.STAY.value,
         Actions.STAY.value,
         Actions.STAY.value,
         Actions.LEFT.value,
@@ -95,7 +105,7 @@ def test_right_lane_constraint():
         obs, reward, _, _, _ = env.step(a)
         print("Reward:", reward)
         tot += reward
-        time.sleep(0.3)
+        time.sleep(0.4)
     print("TOTAL: ", tot)
 
 
@@ -163,7 +173,7 @@ def test_one_way_constraint():
         obs, reward, _, _, _ = env.step(a)
         print("Reward:", reward)
         tot += reward
-        time.sleep(0.5)
+        time.sleep(0.8)
     print("TOTAL: ", tot)
 
 

@@ -8,52 +8,40 @@ class TrafficLightState(Enum):
     RED = 3
     
 class TrafficLight:
-    """A traffic light is defined by the duration of green and red phases and its initial state.
-       We change its color based on the step count."""
-    def __init__(self, green_duration=GREEN_PHASE, yellow_duration=YELLOW_PHASE, red_duration=RED_PHASE, initial_state=TrafficLightState.GREEN):
+    """A traffic light is defined by a cycle length and its offset.
+       We change its color based on the current step count, the offset and the cycle length."""
+    def __init__(self, offset, green_duration: int, yellow_duration: int, red_duration: int):
+        self.offset = offset
         self.green_duration = green_duration
         self.yellow_duration = yellow_duration
         self.red_duration = red_duration
-        self.cycle = green_duration + yellow_duration + red_duration
-        self.initial_state = initial_state
 
-    def get_state(self, step_count: int) -> TrafficLightState:
-        t = step_count % self.cycle
+        self.cycle_length = (
+            self.green_duration
+            + self.yellow_duration
+            + self.red_duration
+        )
 
-        if self.initial_state == TrafficLightState.GREEN:
-            if t < self.green_duration:
-                return TrafficLightState.GREEN
-            elif t < self.green_duration + self.yellow_duration:
-                return TrafficLightState.YELLOW
-            else:
-                return TrafficLightState.RED
+    def get_state(self, step):
+        t = (step + self.offset) % self.cycle_length
 
-        elif self.initial_state == TrafficLightState.RED:
-            if t < self.red_duration:
-                return TrafficLightState.RED
-            elif t < self.red_duration + self.green_duration:
-                return TrafficLightState.GREEN
-            else:
-                return TrafficLightState.YELLOW
+        if t < self.green_duration:
+            return TrafficLightState.GREEN
+
+        elif t < self.green_duration + self.yellow_duration:
+            return TrafficLightState.YELLOW
+
+        else:
+            return TrafficLightState.RED
     
-    def isRed(self, step_count: int):
-        t = step_count % self.cycle
+    def isGreen(self, step_count: int) -> bool:
+        return self.get_state(step_count) == TrafficLightState.GREEN
 
-        if self.initial_state == TrafficLightState.GREEN:
-            if t < self.green_duration:
-                return False
-            elif t < self.green_duration + self.yellow_duration:
-                return False
-            else:
-                return True
+    def isYellow(self, step_count: int) -> bool:
+        return self.get_state(step_count) == TrafficLightState.YELLOW
 
-        elif self.initial_state == TrafficLightState.RED:
-            if t < self.red_duration:
-                return True
-            elif t < self.red_duration + self.green_duration:
-                return False
-            else:
-                return False
+    def isRed(self, step_count: int) -> bool:
+        return self.get_state(step_count) == TrafficLightState.RED
 
 
 class GridMap:
@@ -67,10 +55,6 @@ class GridMap:
             Traffic_light_map is also an array of the same size where each cell has value:
             - 1 if there's a traffic light
             - 0 if there's no traffic light
-
-            Direction_map is an array of the same size where each cell has value:
-            - 1 if it is the border of a road
-            - 0 if it is the road itself
 
             Direction_map is similar to road_border_map but is refered to the border of one way roads. Each cell has value
             - 0 if there is no border
@@ -106,4 +90,7 @@ class GridMap:
     def getAllowedDirections(self, pos):
         x, y = pos
         return self.direction_map[x, y]
+    
+    def isRoad(self, x, y):
+        return self.direction_map[x, y]!=0
         
