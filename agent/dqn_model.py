@@ -5,8 +5,8 @@ import torch.nn.functional as F
 
 class DQNNet(nn.Module):
     """
-    Piccola rete per DQN. Input: feature vector o mappa binaria del FOV.
-    Output: Q-values per ogni azione.
+    Small network for DQN. Input: observation.
+    Output: Q-values for each action.
     """
 
     def __init__(self, n_obs, n_actions):

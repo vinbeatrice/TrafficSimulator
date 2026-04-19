@@ -19,7 +19,6 @@ def rotate_to_egocentric(layer: np.ndarray, agent_dir: str) -> np.ndarray:
 
 def getFOV_with_layers(
     agent_pos,
-    agent_dir,
     fov_w,
     fov_h,
     grid_map,
@@ -37,8 +36,8 @@ def getFOV_with_layers(
 
     xmin = max(0, ax - fov_w // 2)
     ymin = max(0, ay - fov_h // 2)
-    xmax = min(W - 1, xmin + fov_w - 1)
-    ymax = min(H - 1, ymin + fov_h - 1)
+    xmax = min(W - 1, ax + fov_w // 2)
+    ymax = min(H - 1, ay + fov_h // 2)
 
     # --- Allocate layers ---
     obstacles = np.zeros((fov_h, fov_w), dtype=np.float32)
@@ -74,28 +73,23 @@ def getFOV_with_layers(
         "fov_bounds": ((xmin, ymin), (xmax, ymax))
     }
 
-
-
-def getFOV(agent_pos, fov_w, fov_h, grid_w, grid_h):
-    """ Compute actual FOV based on agent position and FOV size """
-    half_w = fov_w // 2
-    half_h = fov_h // 2
-    x, y = agent_pos
-    fov_x_min = max(0, x - half_w)
-    fov_x_max = min(grid_w - 1, x + fov_w - 1)
-    fov_y_min = max(0, y - half_h)
-    fov_y_max = min(grid_h - 1, y + fov_h - 1)
-    return (fov_x_min, fov_y_min), (fov_x_max, fov_y_max)
         
 
 def getTrajectoryinFOV(fov, path, start_idx=0):
     trajectory_in_fov = []
+
     x_min, y_min = fov[0]
     x_max, y_max = fov[1]
 
     for pos in path[start_idx:]:
-        if x_min <= pos[0] <= x_max and y_min <= pos[1] <= y_max:
-            trajectory_in_fov.append(pos)
+        x, y = pos
+
+        if x_min <= x <= x_max and y_min <= y <= y_max:
+            # global to local conversion
+            local_x = x - x_min
+            local_y = y - y_min
+
+            trajectory_in_fov.append((local_x, local_y))
 
     return trajectory_in_fov
 
@@ -103,7 +97,7 @@ def getTrajectoryinFOV(fov, path, start_idx=0):
 def generate_random_path(
     grid_map,
     start=None,
-    max_length=50
+    max_length=40
 ):
     """
     Generate a random, direction-consistent path on the grid map.
@@ -127,18 +121,16 @@ def generate_random_path(
     current = start
 
     for _ in range(max_length - 1):
-        mask = grid_map.getAllowedDirections(current)
         x, y = current
 
         # --- Find legal moves ---
         candidates = []
         for d in Direction:
-            if not (mask & d):
-                continue
 
             dx, dy = DIR_TO_VEC[d]
-            nx, ny = x + dx, y + dy
+            nx, ny = x + dx, y + dy # next cell following direction d
 
+            # map boundaries
             if not (0 <= nx < H and 0 <= ny < W):
                 continue
 
@@ -148,6 +140,11 @@ def generate_random_path(
 
             # avoid loops
             if (nx, ny) in visited:
+                continue
+
+            # direction must be allowed in ARRIVAL cell
+            allowed_next = grid_map.getAllowedDirections((nx, ny))
+            if not (allowed_next & d):
                 continue
 
             candidates.append((nx, ny))
@@ -162,4 +159,199 @@ def generate_random_path(
 
     return path
 
+"""
  
+def generate_random_path_with_tl(
+    grid_map,
+    start=None,
+    max_length=50,
+    max_attempts=15
+):
+    
+    #Generate a random path that passes through at least one traffic light.
+    
+
+    H, W = grid_map.H, grid_map.W
+
+    for _ in range(max_attempts):
+
+        # --- Pick random start if not provided ---
+        if start is None:
+            candidates = [
+                (x, y)
+                for x in range(H)
+                for y in range(W)
+                if grid_map.isRoad(x, y) and not grid_map.isObstacle(x, y)
+            ]
+            current_start = random.choice(candidates)
+        else:
+            current_start = start
+
+        path = [current_start]
+        visited = {current_start}
+        current = current_start
+
+        for _ in range(max_length - 1):
+            x, y = current
+
+            candidates = []
+            for d in Direction:
+                dx, dy = DIR_TO_VEC[d]
+                nx, ny = x + dx, y + dy
+
+                if not (0 <= nx < H and 0 <= ny < W):
+                    continue
+
+                if not grid_map.isRoad(nx, ny):
+                    continue
+
+                if (nx, ny) in visited:
+                    continue
+
+                allowed_next = grid_map.getAllowedDirections((nx, ny))
+                if not (allowed_next & d):
+                    continue
+
+                candidates.append((nx, ny))
+
+            if not candidates:
+                break
+
+            next_cell = random.choice(candidates)
+            path.append(next_cell)
+            visited.add(next_cell)
+            current = next_cell
+
+        # --- CHECK: does path include a traffic light? ---
+        has_tl = any(
+            grid_map.traffic_lights[x, y] != 0
+            for (x, y) in path
+        )
+
+        if has_tl:
+            return path
+
+    # fallback (if no valid path found)
+    return path
+"""
+
+def generate_random_path_with_tl(
+    grid_map,
+    max_length=50,
+    min_pre_steps=10
+):
+    H, W = grid_map.H, grid_map.W
+
+    # --- find cells containing a traffic light ---
+    traffic_cells = [
+        (x, y)
+        for x in range(H)
+        for y in range(W)
+        if grid_map.traffic_lights[x, y] != 0
+    ]
+
+    if not traffic_cells:
+        # normal fallback
+        return generate_random_path(grid_map, max_length=max_length)
+
+    # --- choose a traffic light ---
+    target_tl = random.choice(traffic_cells)
+
+    # --- choose a start ---
+    candidates = [
+        (x, y)
+        for x in range(H)
+        for y in range(W)
+        if grid_map.isRoad(x, y)
+        and not grid_map.isObstacle(x, y)
+        and abs(x - target_tl[0]) + abs(y - target_tl[1]) >= min_pre_steps
+    ]
+
+    if not candidates:
+        return generate_random_path(grid_map, max_length=max_length)
+
+    start = random.choice(candidates)
+
+    # --- build path toward traffic light ---
+    path = [start]
+    current = start
+    visited = {start}
+
+    while len(path) < max_length:
+        x, y = current
+
+        if current == target_tl:
+            break
+
+        best_moves = []
+        best_dist = float("inf")
+
+        for d in Direction:
+            dx, dy = DIR_TO_VEC[d]
+            nx, ny = x + dx, y + dy
+
+            if not (0 <= nx < H and 0 <= ny < W):
+                continue
+
+            if not grid_map.isRoad(nx, ny):
+                continue
+
+            if (nx, ny) in visited:
+                continue
+
+            allowed_next = grid_map.getAllowedDirections((nx, ny))
+            if not (allowed_next & d):
+                continue
+
+            dist = abs(nx - target_tl[0]) + abs(ny - target_tl[1])
+
+            if dist < best_dist:
+                best_moves = [(nx, ny)]
+                best_dist = dist
+            elif dist == best_dist:
+                best_moves.append((nx, ny))
+
+        if not best_moves:
+            break
+
+        next_cell = random.choice(best_moves)
+        path.append(next_cell)
+        visited.add(next_cell)
+        current = next_cell
+
+    # --- 5. continua random dopo il semaforo ---
+    while len(path) < max_length:
+        x, y = current
+
+        candidates = []
+        for d in Direction:
+            dx, dy = DIR_TO_VEC[d]
+            nx, ny = x + dx, y + dy
+
+            if not (0 <= nx < H and 0 <= ny < W):
+                continue
+
+            if not grid_map.isRoad(nx, ny):
+                continue
+
+            if (nx, ny) in visited:
+                continue
+
+            allowed_next = grid_map.getAllowedDirections((nx, ny))
+            if not (allowed_next & d):
+                continue
+
+            candidates.append((nx, ny))
+
+        if not candidates:
+            break
+
+        next_cell = random.choice(candidates)
+        path.append(next_cell)
+        visited.add(next_cell)
+        current = next_cell
+    
+    if target_tl not in path:
+        return generate_random_path_with_tl(grid_map, max_length, min_pre_steps)
+    else:
+        return path

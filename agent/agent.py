@@ -8,8 +8,8 @@ import math
 from agent.dqn_model import DQNNet
 from agent.reply_buffer import ReplayBuffer
 
-from config.train_config import NUM_EPISODES, LR, GAMMA, BATCH_SIZE, REPLAY_BUFFER_SIZE
-from config.agent_config import INITIAL_EPSILON, FINAL_EPSILON, EPSILON_DECAY, DECAY_EPISODES
+from config.train_config import LR, GAMMA, BATCH_SIZE, REPLAY_BUFFER_SIZE
+from config.agent_config import INITIAL_EPSILON, FINAL_EPSILON, EPSILON_DECAY
 
     
 
@@ -48,6 +48,7 @@ class DQNAgent:
         self.n_obs = n_obs
         self.n_actions = n_actions
         self.step_count = 0
+        self.grad_norms = []
 
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -73,20 +74,10 @@ class DQNAgent:
     # Select next action given current state
     def select_action(self, state):
         self.step_count += 1
-        #self.epsilon = self.final_epsilon + (self.initial_epsilon - self.final_epsilon) * \
-                #np.exp(-1. * self.step_count / self.epsilon_decay)
-        #self.epsilon_decay = INITIAL_EPSILON / (NUM_EPISODES)
-        #self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
         #self.epsilon = max(self.final_epsilon, self.initial_epsilon - self.step_count / EPSILON_DECAY)
-        
-        if self.epsilon > self.final_epsilon:
-            self.epsilon -= self.epsilon_step
-            self.epsilon = max(self.epsilon, self.final_epsilon)
-        
 
         if np.random.rand() < self.epsilon: # exploration
             return np.random.randint(0,self.n_actions)
-        #return np.argmax(self.model.predict_on_batch(state)) # exploitation
         else:
             state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
             with torch.no_grad():
@@ -96,6 +87,16 @@ class DQNAgent:
 
     def store_transition(self, state, action, reward, next_state, done):
         self.buffer.push(state, action, reward, next_state, done)
+
+    # Compute L2 norm
+    def compute_grad_norm(self):
+        total_norm = 0.0
+        for p in self.policy_net.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        return total_norm ** 0.5
+
 
     def update(self, batch_size=BATCH_SIZE):
         if len(self.buffer) < batch_size:
@@ -112,12 +113,26 @@ class DQNAgent:
         q_values = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
 
         with torch.no_grad():
-            next_q = self.target_net(next_states).max(1)[0]
+
+            next_actions = self.policy_net(next_states).argmax(1)
+            next_q = self.target_net(next_states).gather(
+                1, next_actions.unsqueeze(1)
+            ).squeeze(1)
+
             target = rewards + self.gamma * next_q * (1 - dones)
 
-        loss = nn.MSELoss()(q_values, target)
+        #loss = nn.MSELoss()(q_values, target)
+        loss = nn.SmoothL1Loss()(q_values, target)
+
         self.optimizer.zero_grad()
         loss.backward()
+
+        #torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 200) # Gradient clipping to avoid exploding gradient
+
+
+        grad_norm = self.compute_grad_norm()
+        self.grad_norms.append(grad_norm)   # list for logging
+
         self.optimizer.step()
     
     def update_target(self):
@@ -125,31 +140,9 @@ class DQNAgent:
     
     def decay_epsilon(self, episode):
         """Reduce exploration rate after each episode."""
-
-        """
-        if episode < 4000:
-            self.epsilon = 1.0 - episode * (1.0 - 0.2) / 4000
-        elif episode < 7000:
-            self.epsilon = 0.2 - (episode - 4000) * (0.2 - 0.05) / 3000
-        else:
-            self.epsilon = 0.05 - (episode - 7000) * (0.05 - 0.01) / 2000
-        
-        epsilon_decay_episodes = int(0.98 * NUM_EPISODES)
-        if episode < epsilon_decay_episodes:
-            self.epsilon = self.initial_epsilon - episode * (
-                (self.initial_epsilon - self.final_epsilon) / epsilon_decay_episodes
-            )
-        else:
-            self.epsilon = self.final_epsilon
-        
-        EPS_DECAY_EPISODES = 15_000
         self.epsilon = max(
-                        self.final_epsilon,
-                        self.initial_epsilon - episode / EPS_DECAY_EPISODES * (self.initial_epsilon - self.final_epsilon)
-                    )
-        """
+            self.final_epsilon,
+            self.initial_epsilon - episode * (self.initial_epsilon - self.final_epsilon) / 45_000
+        )
+
         #self.epsilon = max(self.final_epsilon, self.initial_epsilon - self.step_count / EPSILON_DECAY)
-
-
-
-

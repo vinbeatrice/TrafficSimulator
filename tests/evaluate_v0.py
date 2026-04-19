@@ -1,0 +1,190 @@
+import numpy as np
+import torch
+
+from env.path_env import PathEnv
+from env.maps import GridMap
+from agent.agent import DQNAgent
+from utils.helpers import generate_random_path
+
+from config.env_config import FOV_W, FOV_H, MAX_STEPS
+from config.train_config import OBSTACLE_MAP, TL_MAP, DIRECTION_MAP, V0_PATH, SAVE_PATH
+from config.agent_config import N_CHANNELS
+
+
+# =========================
+# OBS → ARRAY
+# =========================
+def obs_to_array(obs, fov_h=FOV_H, fov_w=FOV_W):
+
+    traj_map = np.zeros((fov_h, fov_w), dtype=np.float32)
+
+    for x, y in obs["trajectory"]:
+        if 0 <= x < fov_w and 0 <= y < fov_h:
+            traj_map[y, x] = 1.0
+
+    obstacle_map = obs["obstacles"].astype(np.float32)
+    traffic_map = obs["traffic_lights"].astype(np.float32) / 3.0
+    allowed_dirs = obs["allowed_dirs"].astype(np.float32)
+
+    return np.concatenate([
+        traj_map.flatten(),
+        obstacle_map.flatten(),
+        traffic_map.flatten(),
+        allowed_dirs.flatten()
+    ])
+
+
+# =========================
+# ORACLE POLICY (perfect path follower)
+# =========================
+def oracle_action(env):
+
+    if env.path_index >= len(env.path):
+        return 4  # STAY
+
+    target = env.path[env.path_index]
+    curr = env.agent_pos
+
+    dx = target[0] - curr[0]
+    dy = target[1] - curr[1]
+
+    if dx == -1: return 1  # UP
+    if dx == 1:  return 3  # DOWN
+    if dy == 1:  return 0  # RIGHT
+    if dy == -1: return 2  # LEFT
+
+    return 4
+
+
+# =========================
+# EPISODE ROLLOUT (greedy only)
+# =========================
+def run_episode(env, agent=None, use_oracle=False):
+
+    obs, _ = env.reset()
+    state = obs_to_array(obs)
+
+    total_reward = 0
+    done = False
+    truncated = False
+
+    while not (done or truncated):
+
+        if use_oracle:
+            action = oracle_action(env)
+        else:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
+            with torch.no_grad():
+                action = agent.policy_net(state_tensor).argmax().item()
+
+        next_obs, reward, done, truncated, _ = env.step(action)
+        state = obs_to_array(next_obs)
+
+        total_reward += reward
+
+    success = env.path_index >= len(env.path)
+
+    return total_reward, success
+
+
+# =========================
+# EVALUATION LOOP
+# =========================
+def evaluate_agent(env, agent, n_paths=100, max_length=50):
+
+    results = []
+
+    for i in range(n_paths):
+
+        path = generate_random_path(env.map, max_length=max_length)
+        env.setPath(path)
+
+        # Oracle baseline
+        oracle_reward, oracle_success = run_episode(env, use_oracle=True)
+
+        # Agent performance
+        agent_reward, agent_success = run_episode(env, agent=agent)
+
+        results.append({
+            "oracle_reward": oracle_reward,
+            "agent_reward": agent_reward,
+            "oracle_success": oracle_success,
+            "agent_success": agent_success,
+        })
+
+        print(
+            f"[{i}] "
+            f"oracle: {oracle_reward:.2f} ({oracle_success}) | "
+            f"agent: {agent_reward:.2f} ({agent_success})"
+        )
+
+    return results
+
+
+# =========================
+# SUMMARY
+# =========================
+def summarize_results(results):
+
+    oracle_rewards = np.array([r["oracle_reward"] for r in results])
+    agent_rewards = np.array([r["agent_reward"] for r in results])
+
+    oracle_success = np.array([r["oracle_success"] for r in results])
+    agent_success = np.array([r["agent_success"] for r in results])
+
+    print("\n===== RESULTS =====")
+    print(f"Oracle avg reward: {oracle_rewards.mean():.2f}")
+    print(f"Agent avg reward:  {agent_rewards.mean():.2f}")
+    print(f"Gap: {(agent_rewards - oracle_rewards).mean():.2f}")
+
+    print(f"Oracle success rate: {oracle_success.mean()*100:.1f}%")
+    print(f"Agent success rate:  {agent_success.mean()*100:.1f}%")
+
+
+# =========================
+# MAIN
+# =========================
+def main():
+
+    # --- ENV ---
+    grid_map = GridMap(
+        obstacle_map=OBSTACLE_MAP,
+        traffic_light_map=TL_MAP,
+        direction_map=DIRECTION_MAP
+    )
+
+    dummy_path = generate_random_path(grid_map)
+
+    env = PathEnv(
+        grid_map=grid_map,
+        path=dummy_path,
+        fov=(FOV_W, FOV_H),
+        max_steps=MAX_STEPS,
+        render_mode=None
+    )
+
+    # --- AGENT ---
+    n_obs = FOV_W * FOV_H * N_CHANNELS
+    n_actions = env.action_space.n
+
+    agent = DQNAgent(
+        env=env,
+        n_obs=n_obs,
+        n_actions=n_actions
+    )
+
+    # ⚠️ CARICA PESI
+    agent.policy_net.load_state_dict(
+        torch.load(V0_PATH, map_location=agent.device)
+    )
+    agent.policy_net.eval()
+
+    # --- EVALUATION ---
+    results = evaluate_agent(env, agent, n_paths=1000)
+
+    summarize_results(results)
+
+
+if __name__ == "__main__":
+    main()

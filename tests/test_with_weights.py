@@ -16,8 +16,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 map = GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP, direction_map=DIRECTION_MAP)
 env = PathEnv(grid_map=map, path=TEST_PATH, fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TEST, max_steps=MAX_STEPS)
-print("ENV creato")
+print("ENV created")
 obs, _ = env.reset()
+#print(obs)
 
 # --- Inizializza rete e carica pesi ---
 input_dim = FOV_W * FOV_H * N_CHANNELS

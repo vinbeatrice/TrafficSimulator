@@ -3,29 +3,27 @@ from gymnasium import spaces
 import numpy as np
 import pygame
 from enum import Enum
+import os
 
 #from maps import GridMap
 from constraints.reward_manager import RewardManager
 from constraints.collision import CollisionConstraint
 from constraints.traffic_light import TrafficLightConstraint
-#from constraints.right_lane import RightLaneConstraint
-#from constraints.one_way import OneWayConstraint
-#from constraints.old_direction import DirectionConstraint
 from constraints.allowed_direction import AllowedDirectionConstraint
-from env.maps import GridMap, TrafficLight, TrafficLightState
-from env.directions import Direction
+from env.maps import GridMap, TrafficLight
+from env.directions import Direction, ALL_DIRECTIONS
 
-from config.env_config import RED_PHASE, GREEN_PHASE, YELLOW_PHASE
-from config.penalty_config import COLLISION_PENALTY, TRAFFIC_LIGHT_PENALTY, LANE_PENALTY, USELESS_STEP_PENALTY
+
+from config.penalty_config import COLLISION_PENALTY, TRAFFIC_LIGHT_PENALTY, LANE_PENALTY, USELESS_STEP_PENALTY, IDLE_PENALTY
 from config.traffic_lights import TL_GROUPS
-from utils.helpers import getFOV, getTrajectoryinFOV, getFOV_with_layers
+from utils.helpers import getTrajectoryinFOV, getFOV_with_layers
 
 """A simple Gym environment where an agent must learn to follow a chosen path on a 2D grid.
    - Skill: Follow a predefined path on a grid without deviations
-   - Information: Agent position, agent's field of view (FOV), path trajectory into the FOV
+   - Information: Agent's field of view (FOV)
    - Actions: Move up, down, left, right or stay still
-   - Success: Reach the end of the path without deviating
-   - End: When agent reaches the end of the path (or optional time limit)
+   - Success: Reach the end of the path (possibly avoiding deviations)
+   - End: When agent reaches the end of the path (or the maximum number of time steps)
 """
 
 class Actions(Enum):
@@ -74,8 +72,10 @@ class PathEnv(gym.Env):
         self.path_index_map = {pos: i for i, pos in enumerate(self.path)} #{position → path index}
         self.step_count = 0
         self.fov_w, self.fov_h = fov
-        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, agent_dir=Direction.UP, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
+        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
         self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, start_idx=self.path_index)
+
+        self.car_images = None
         
         # ---------- CONSTRAINTS ----------
         self.reward_manager = RewardManager()
@@ -84,20 +84,16 @@ class PathEnv(gym.Env):
         self.reward_manager.add_constraint(AllowedDirectionConstraint(penalty=LANE_PENALTY))
 
 
-
         self.max_steps = max_steps
 
 
         # Define observation space
         self.observation_space = gym.spaces.Dict(
             {
-                "fov": gym.spaces.Box(low=0, high=max(self.W, self.H), shape=(2, 2), dtype=np.int32), # [[xmin, ymin], [xmax, ymax]]
                 "trajectory": gym.spaces.Sequence(gym.spaces.MultiDiscrete([self.W, self.H])), # portion of path within FOV
                 "obstacles": spaces.Box(low=0, high=1, shape=(self.fov_h, self.fov_w), dtype=np.int8), #obstacles layer (0=free, 1=obstacle)
                 "traffic_lights": spaces.Box(low=0, high=3, shape=(self.fov_h, self.fov_w), dtype=np.int8), # traffic lights layer (0=none, 1=green, 2=yellow, 3=red)
-                #"borders": spaces.Box(low=0, high=5, shape=(self.fov_h, self.fov_w), dtype=np.int8) # road borders layer (0=road, 1=border double direction, 2=border UP, 3=border DOWN, 4=border LEFT. 5=border RIGHT)
-                #"one_way_borders": spaces.Box(low=0, high=4, shape=(self.fov_h, self.fov_w), dtype=np.int8) # one way road borders layer (0=road, 1=border UP, 2=border DOWN, 3=border LEFT. 4=border RIGHT)
-                "allowed_dirs": spaces.Box(low=0, high=15, shape=(self.fov_h, self.fov_w), dtype=np.int8)
+                "allowed_dirs": spaces.Box(low=0, high=15, shape=(self.fov_h, self.fov_w), dtype=np.int8) # allowed directions layer
             }
         )
 
@@ -136,9 +132,7 @@ class PathEnv(gym.Env):
            - traffic lights visible in fov
            - allowed directions in fov
         """
-        fov = getFOV(agent_pos=self.agent_pos, fov_h=self.fov_h, fov_w=self.fov_w, grid_h=self.map.H, grid_w=self.map.W)
         return {
-            "fov": np.array(fov, dtype=np.int32),
             "trajectory": self.trajectory_in_fov,
             "obstacles": self.fov_data["obstacles"],
             "traffic_lights": self.fov_data["traffic_lights"],
@@ -190,7 +184,7 @@ class PathEnv(gym.Env):
         self.path_index = 1
         self.step_count = 0
         self.idle_steps = 0
-        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, agent_dir=self.agent_dir, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
+        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
         self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, start_idx=self.path_index)
 
         observation = self._get_obs()
@@ -230,8 +224,7 @@ class PathEnv(gym.Env):
             pass
 
         # Update FOV and trajectory in FOV
-        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, agent_dir=self.agent_dir, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
-        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, start_idx=self.path_index)
+        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
 
         terminated = False
         new_pos_tuple = (int(new_pos[0]), int(new_pos[1])) # convert to tuple for comparison
@@ -249,19 +242,29 @@ class PathEnv(gym.Env):
                 reward += USELESS_STEP_PENALTY
 
             if self.path_index >= len(self.path):
-                reward += 20.0
+                reward += 10.0
                 terminated = True
         else: # position not in path
             reward += USELESS_STEP_PENALTY
         
+        
         self.idle_steps += 1 if action == Actions.STAY.value else 0
         if action == Actions.STAY.value:
-            reward = -0.5
+            reward = IDLE_PENALTY # Note: we overwrite possible useless step penalty in case of stay action, otherwise the agente receives a larger penalty for staying idle in front of a traffic light wrt move continuously
+
+        self.step_count += 1
+
+
+        # Update FOV and trajectory in FOV
+        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
+        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, start_idx=self.path_index)
+
+        # If agent looses track of the path, terminate episode
+        if len(self.trajectory_in_fov) == 0:
+            terminated = True
 
         if self.render_mode == "human":
             self._render_frame()
-
-        self.step_count += 1
 
         # Apply pernalty for violations
         state = self._get_state()
@@ -283,12 +286,17 @@ class PathEnv(gym.Env):
     
     def setPath(self, path):
         self.path = path
+        self.path_index_map = {pos: i for i, pos in enumerate(self.path)}
 
     def render(self):
-        if self.render_mode == "rgb_array":
-            return self._render_frame()
+        if self.render_mode is None:
+            return
+        
+        return self._render_frame()
 
     def _render_frame(self):
+        if self.render_mode == "human" and self.car_images is None:
+            self._load_assets()
 
         if self.window is None and self.render_mode == "human":
             pygame.init()
@@ -304,50 +312,235 @@ class PathEnv(gym.Env):
         
         pix_square_size = (self.window_size / self.W)  # size of a single grid square in pixels
 
+        # Draw roads
+        """
+        for y in range(0, self.H):
+            for x in range(0, self.W):
+                if self.map.isRoad(y, x):
+                    dirs = self.map.getAllowedDirections((y,x))
+                    if dirs & ALL_DIRECTIONS:
+                        img = self.road
+                    if dirs & Direction.UP:
+                        if dirs & Direction.RIGHT:
+                            # right lane of vertical one-way road OR upper lane of horizontal one-way road
+                            if self.map.isRoad(y+1, x):
+                                # right lane of vertical one-way road
+                                img = self.one_way_road_images["right"]
+                            else:
+                                # upper lane of horizontal one-way road
+                                img = self.one_way_road_images["up"]
+                        elif dirs & Direction.LEFT:
+                            # left lane of vertical one-way road OR upper lane of horizontal one-way road
+                            if self.map.isRoad(y+1, x):
+                                # left lane of vertical one-way road
+                                img = self.one_way_road_images["left"]
+                            else:
+                                # upper lane of horizontal one-way road
+                                img = self.one_way_road_images["up"]
+                        else:
+                            # right lane of a vertical two-ways road
+                            img = self.two_ways_road_images["right"]
+
+                    elif dirs & Direction.DOWN:
+                        if dirs & Direction.RIGHT:
+                            # right lane of a vertical one-way road OR lower lane of a horizontal one-way road
+                            if self.map.isRoad(y-1, x):
+                                # right lane of a vertical one-way road
+                                img = self.one_way_road_images["right"]
+                            else:
+                                # lower lane of a horizontal one-way road
+                                img = self.one_way_road_images["down"]
+                        elif dirs & Direction.LEFT:
+                            # left lane of a vertical one-way road OR lower lane of a horizontal one-way road
+                            if self.map.isRoad(y-1, x):
+                                # left lane of a vertical one-way
+                                img = self.one_way_road_images["left"]
+                            else:
+                                # lower lane of a horizontal one-way road
+                                img = self.one_way_road_images["down"]
+                        else:
+                            # left lane of a vertical two-ways road
+                            img = self.two_ways_road_images["left"]
+
+                    elif dirs & Direction.LEFT:
+                        # upper lane of a horizontal two-ways road
+                        img = self.two_ways_road_images["up"]
+                    else:
+                        # lower lane of a horizontal two-ways road
+                        img = self.two_ways_road_images["down"]
+    
+
+                    img_scaled = pygame.transform.scale(
+                        img,
+                        (int(pix_square_size), int(pix_square_size))
+                    )
+                    px = int(x * pix_square_size)
+                    py = int(y * pix_square_size)
+
+                    canvas.blit(img_scaled, (px, py))
+                    """
+        
+        for y in range(self.H):
+            for x in range(self.W):
+
+                if not self.map.isRoad(y, x):
+                    continue
+
+                dirs = self.map.getAllowedDirections((y, x))
+
+                # --- safe neighbors ---
+                up = y > 0 and self.map.isRoad(y-1, x)
+                down = y < self.H-1 and self.map.isRoad(y+1, x)
+                left = x > 0 and self.map.isRoad(y, x-1)
+                right = x < self.W-1 and self.map.isRoad(y, x+1)
+
+                # --- orientation ---
+                vertical_continuity = up and down
+                horizontal_continuity = left and right
+                orientation = None
+
+                if vertical_continuity and not horizontal_continuity:
+                    orientation = "vertical"
+                elif horizontal_continuity and not vertical_continuity:
+                    orientation = "horizontal"
+                else:
+                    # fallback (incroci o casi ambigui)
+                    orientation = None
+
+                # --- choose image ---
+                if orientation == "vertical":
+
+                    has_left = dirs & Direction.LEFT
+                    has_right = dirs & Direction.RIGHT
+
+                    # one-way
+                    if has_left:
+                        img = self.one_way_road_images["left"]
+                    elif has_right:
+                            img = self.one_way_road_images["right"]
+                    else: # two-ways
+                        if left:
+                            img = self.two_ways_road_images["right"]
+                        else:
+                            img = self.two_ways_road_images["left"]
+
+                elif orientation == "horizontal":  # horizontal
+
+                    has_up = dirs & Direction.UP
+                    has_down = dirs & Direction.DOWN
+
+                    # one-way
+                    if has_up:
+                        img = self.one_way_road_images["up"]
+                    elif has_down:
+                        img = self.one_way_road_images["down"]
+                    # two-ways
+                    else:
+                        if up:
+                            img = self.two_ways_road_images["down"]
+                        else:
+                            img = self.two_ways_road_images["up"]
+                else:
+                    img = self.road
+                
+                # --- draw ---
+                px = x * pix_square_size
+                py = y * pix_square_size
+
+                img_scaled = pygame.transform.scale(
+                    img,
+                    (int(pix_square_size), int(pix_square_size))
+                )
+
+                canvas.blit(img_scaled, (px, py))
+
     
         # Draw the path with a trace
-        for (y, x) in self.path:
-            pygame.draw.rect(
-                canvas,
-                (160, 32, 240),
-                pygame.Rect(
-                    x * pix_square_size,
-                    y * pix_square_size,
-                    pix_square_size,
-                    pix_square_size,
-                ),
+        for i in range(1, len(self.path) - 1):
+            prev = self.path[i - 1]
+            curr = self.path[i]
+            next_ = self.path[i + 1]
+
+            dir_prev = (curr[0] - prev[0], curr[1] - prev[1])
+            dir_next = (next_[0] - curr[0], next_[1] - curr[1])
+
+            y, x = curr
+            px = x * pix_square_size
+            py = y * pix_square_size
+
+
+            # --- straight ---
+            if dir_prev == dir_next:
+                if dir_prev in [(0,1), (0,-1)]:
+                    img = self.trace_images["horizontal"]
+                else:
+                    img = self.trace_images["vertical"]
+
+            # --- curve ---
+            else:
+                if dir_prev == (1,0) and dir_next == (0,1) or dir_prev == (0,-1) and dir_next == (-1,0):
+                    img = self.trace_images["right-top"]
+
+                elif dir_prev == (1,0) and dir_next == (0,-1) or dir_prev == (0,1) and dir_next == (-1,0):
+                    img = self.trace_images["left-top"]
+
+                elif dir_prev == (-1,0) and dir_next == (0,1) or dir_prev == (0,-1) and dir_next == (1,0):
+                    img = self.trace_images["down-right"]
+
+                elif dir_prev == (-1,0) and dir_next == (0,-1) or dir_prev == (0,1) and dir_next == (1,0):
+                    img = self.trace_images["down-left"]
+
+                else:
+                    img = self.road # fallback
+                    print(f"i={i}, prev={prev}, curr={curr}, next={next_}")
+                    print(f"dir_prev={dir_prev}, dir_next={dir_next}")
+
+
+            # --- draw ---
+            img_scaled = pygame.transform.scale(
+                img,
+                (int(pix_square_size), int(pix_square_size))
             )
+
+            canvas.blit(img_scaled, (px, py))
 
 
         # Draw the target
         (ty, tx) = self.path[-1]
-        pygame.draw.rect(
-            canvas,
-            (0, 0, 100),
-            pygame.Rect(
-                    tx * pix_square_size,
-                    ty * pix_square_size,
-                    pix_square_size,
-                    pix_square_size,
-                ),
+
+        px = int(tx * pix_square_size)
+        py = int(ty * pix_square_size)
+
+        goal_scaled = pygame.transform.scale(
+            self.goal_img,
+            (int(pix_square_size), int(pix_square_size))
         )
 
-        # --- Draw obstacles ---
+        canvas.blit(goal_scaled, (px, py))
+
+
+        # Draw obstacles
         for y in range(self.H):
             for x in range(self.W):
                 if self.map.obstacles[y, x] == 1:
-                    pygame.draw.rect(
-                        canvas,
-                        (0, 0, 0),  # black
-                        pygame.Rect(
-                            x * pix_square_size,
-                            y * pix_square_size,
-                            pix_square_size,
-                            pix_square_size,
-                        ),
+
+                    px = int(x * pix_square_size)
+                    py = int(y * pix_square_size)
+
+                    # distinguish houses and obstacles in the road
+                    if self.map.isRoad(y, x):
+                        img = self.obstacle_img
+                    else:
+                        img = self.house_img
+
+                    img_scaled = pygame.transform.scale(
+                        img,
+                        (int(pix_square_size), int(pix_square_size))
                     )
 
-        # --- Draw traffic lights ---
+                    canvas.blit(img_scaled, (px, py))
+
+        # Draw traffic lights
         for (y, x), light in self.traffic_lights.items():
             if light.isGreen(self.step_count):
                 color = (0, 200, 0)
@@ -369,27 +562,38 @@ class PathEnv(gym.Env):
 
         # Draw the agent
         ax, ay = int(self.agent_pos[0]), int(self.agent_pos[1])
-        center = (int((ay + 0.5) * pix_square_size), int((ax + 0.5) * pix_square_size))
-        radius = int(min(pix_square_size, pix_square_size) / 3)
-        pygame.draw.circle(canvas, (0, 0, 255), center, radius)
+
+        px = int(ay * pix_square_size)
+        py = int(ax * pix_square_size)
+
+        # fallback direction
+        direction = self.agent_dir if self.agent_dir is not None else Direction.UP
+        car_img = self.car_images[direction]
+
+        scale = int(pix_square_size * 0.8)
+        offset = (pix_square_size - scale) // 2
+
+        car_img = pygame.transform.scale(car_img, (scale, scale))
+        canvas.blit(car_img, (px + offset, py + offset))
 
 
         # Add gridlines
+        """
         for x in range(self.W + 1):
             pygame.draw.line(
                 canvas,
                 0,
                 (0, pix_square_size * x),
                 (self.window_size, pix_square_size * x),
-                width=3,
+                width=1,
             )
             pygame.draw.line(
                 canvas,
                 0,
                 (pix_square_size * x, 0),
                 (pix_square_size * x, self.window_size),
-                width=3,
-            )
+                width=1,
+            )"""
 
         if self.render_mode == "human":
             # The following line copies our drawings from `canvas` to the visible window
@@ -409,3 +613,50 @@ class PathEnv(gym.Env):
         if self.window is not None:
             pygame.display.quit()
             pygame.quit()
+    
+
+    def _load_assets(self):
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        assets_dir = os.path.join(base_dir, "assets")
+        tiles_dir = os.path.join(assets_dir, "tiles")
+
+        # --- Cars ---
+        cars_dir = os.path.join(assets_dir, "cars")
+        self.car_images = {
+            Direction.UP: pygame.image.load(os.path.join(cars_dir, "car_up.png")),
+            Direction.DOWN: pygame.image.load(os.path.join(cars_dir, "car_down.png")),
+            Direction.LEFT: pygame.image.load(os.path.join(cars_dir, "car_left.png")),
+            Direction.RIGHT: pygame.image.load(os.path.join(cars_dir, "car_right.png")),
+        }
+
+        # --- Obstacles ---
+        self.obstacle_img = pygame.image.load(os.path.join(tiles_dir, "obstacle.png"))
+        self.house_img = pygame.image.load(os.path.join(tiles_dir, "house 3.png"))
+
+        # --- Goal ---
+        self.goal_img = pygame.image.load(os.path.join(tiles_dir, "goal.png"))
+
+        # --- Road ---
+        self.road = pygame.image.load(os.path.join(tiles_dir, "road.png"))
+        self.two_ways_road_images = {
+            "down": pygame.image.load(os.path.join(tiles_dir, "2-ways down.png")),
+            "up": pygame.image.load(os.path.join(tiles_dir, "2-ways top.png")),
+            "left": pygame.image.load(os.path.join(tiles_dir, "2-ways left.png")),
+            "right": pygame.image.load(os.path.join(tiles_dir, "2-ways right.png"))
+        }
+        self.one_way_road_images = {
+            "down": pygame.image.load(os.path.join(tiles_dir, "one-way down.png")),
+            "up": pygame.image.load(os.path.join(tiles_dir, "one-way top.png")),
+            "left": pygame.image.load(os.path.join(tiles_dir, "one-way left.png")),
+            "right": pygame.image.load(os.path.join(tiles_dir, "one-way right.png"))
+        }
+
+        # --- Trace ---
+        self.trace_images = {
+            "left-top": pygame.image.load(os.path.join(tiles_dir, "trace left-top.png")),
+            "right-top": pygame.image.load(os.path.join(tiles_dir, "trace right-top.png")),
+            "down-left": pygame.image.load(os.path.join(tiles_dir, "trace down-left.png")),
+            "down-right": pygame.image.load(os.path.join(tiles_dir, "trace down-right.png")),
+            "horizontal": pygame.image.load(os.path.join(tiles_dir, "trace horizontal.png")),
+            "vertical": pygame.image.load(os.path.join(tiles_dir, "trace vertical.png")),
+        }
