@@ -3,8 +3,8 @@ from env.maps import TrafficLightState
 from config.penalty_config import TRAFFIC_LIGHT_PENALTY
 
 class TrafficLightConstraint(Constraint):
-    def __init__(self, traffic_lights, penalty: float):
-        super().__init__(penalty)
+    def __init__(self, traffic_lights, penalty: float, termination: bool):
+        super().__init__(penalty, termination)
         # Initialize dictionary with traffic light position as key and the corresponding traffic light instance as value
         self.traffic_lights = traffic_lights  # dict[(x,y)] -> TrafficLight
 
@@ -19,5 +19,5 @@ class TrafficLightConstraint(Constraint):
             #print("[STEP ", step_count, "] " "LA LUCE è: ", light.get_state(step_count), "IN POSIZIONE ", agent_pos, " --> ", (light.get_state(step_count)==TrafficLightState.RED))
             if light.isRed(step_count):
                 #print("TRAFFIC LIGHT VIOLATED")
-                return TRAFFIC_LIGHT_PENALTY, False
+                return TRAFFIC_LIGHT_PENALTY, self.termination
         return 0.0, False

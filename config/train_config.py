@@ -2,9 +2,9 @@ import numpy as np
 from env.directions import Direction, ALL_DIRECTIONS
 """ Global constants used in training """
 
-NUM_EPISODES = 50_000
+NUM_EPISODES = 80_000
 BATCH_SIZE = 64
-GAMMA = 1.0
+GAMMA = 0.99
 
 LR = 1e-5
 
@@ -15,27 +15,10 @@ TARGET_UPDATE_FREQ = 1500 # IN STEPS
 REPLAY_BUFFER_SIZE = 50_000
 
 SAVE_PATH = "weights/dqn_final_weights.pt"
+MULTI_PATH = "weights/dqn_multi_agent_final_weights.pt"
 
-V0_PATH = "weights/dqn_final_weights_v0.pt"
-"""
-===== RESULTS =====
-Oracle avg reward: 45.68
-Agent avg reward:  -49.32
-Gap: -95.01
-Oracle success rate: 100.0%
-Agent success rate:  88.5%
-"""
+NPC_PATH = "weights/1v5_weights_zero_idle_multi_path.pt"
 
-
-V0_PATH_1 = "weights/dqn_final_weights_v0_1.pt"
-"""
-===== RESULTS =====
-Oracle avg reward: 51.62
-Agent avg reward:  38.81
-Gap: -12.81
-Oracle success rate: 100.0%
-Agent success rate:  98.9%
-"""
 
 
 
@@ -218,7 +201,7 @@ OBSTACLE_MAP = np.array(
 DIRECTION_MAP = np.zeros((23, 23), dtype=np.int8)
 for r in range(2, 20):
     DIRECTION_MAP[r, 2] = DIRECTION_MAP[r, 2] | Direction.UP
-for r in range(1, 20):
+for r in range(1, 21):
     DIRECTION_MAP[r, 8] = DIRECTION_MAP[r, 8] | Direction.UP
 for r in range(1, 21):
     DIRECTION_MAP[r, 21] = DIRECTION_MAP[r, 21] | Direction.UP

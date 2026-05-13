@@ -4,34 +4,12 @@ import torch
 from env.path_env import PathEnv
 from env.maps import GridMap
 from agent.agent import DQNAgent
-from utils.helpers import generate_random_path
+from utils.helpers import generate_random_path, generate_random_path_with_tl
 
 from config.env_config import FOV_W, FOV_H, MAX_STEPS
-from config.train_config import OBSTACLE_MAP, TL_MAP, DIRECTION_MAP, V0_PATH, SAVE_PATH
+from config.train_config import OBSTACLE_MAP, TL_MAP, DIRECTION_MAP, SAVE_PATH, MULTI_PATH
 from config.agent_config import N_CHANNELS
 
-
-# =========================
-# OBS → ARRAY
-# =========================
-def obs_to_array(obs, fov_h=FOV_H, fov_w=FOV_W):
-
-    traj_map = np.zeros((fov_h, fov_w), dtype=np.float32)
-
-    for x, y in obs["trajectory"]:
-        if 0 <= x < fov_w and 0 <= y < fov_h:
-            traj_map[y, x] = 1.0
-
-    obstacle_map = obs["obstacles"].astype(np.float32)
-    traffic_map = obs["traffic_lights"].astype(np.float32) / 3.0
-    allowed_dirs = obs["allowed_dirs"].astype(np.float32)
-
-    return np.concatenate([
-        traj_map.flatten(),
-        obstacle_map.flatten(),
-        traffic_map.flatten(),
-        allowed_dirs.flatten()
-    ])
 
 
 # =========================
@@ -62,7 +40,9 @@ def oracle_action(env):
 def run_episode(env, agent=None, use_oracle=False):
 
     obs, _ = env.reset()
-    state = obs_to_array(obs)
+    #if not use_oracle:
+        #print(obs)
+    state = env.obs_to_array(obs)
 
     total_reward = 0
     done = False
@@ -79,10 +59,13 @@ def run_episode(env, agent=None, use_oracle=False):
                 action = agent.policy_net(state_tensor).argmax().item()
 
         next_obs, reward, done, truncated, _ = env.step(action)
-        state = obs_to_array(next_obs)
+        #if not use_oracle:
+        #    print(action)
+        #    print(next_obs)
+        state = env.obs_to_array(next_obs)
 
         total_reward += reward
-
+    print("DONE")
     success = env.path_index >= len(env.path)
 
     return total_reward, success
@@ -91,13 +74,13 @@ def run_episode(env, agent=None, use_oracle=False):
 # =========================
 # EVALUATION LOOP
 # =========================
-def evaluate_agent(env, agent, n_paths=100, max_length=50):
+def evaluate_agent(env, agent, n_paths=100, max_length=20):
 
     results = []
 
     for i in range(n_paths):
 
-        path = generate_random_path(env.map, max_length=max_length)
+        path = generate_random_path_with_tl(env.map, max_length=max_length)
         env.setPath(path)
 
         # Oracle baseline
@@ -161,7 +144,9 @@ def main():
         path=dummy_path,
         fov=(FOV_W, FOV_H),
         max_steps=MAX_STEPS,
-        render_mode=None
+        render_mode="human",
+        num_npc=0,
+        npc_policy_path=None
     )
 
     # --- AGENT ---
@@ -176,7 +161,7 @@ def main():
 
     # ⚠️ CARICA PESI
     agent.policy_net.load_state_dict(
-        torch.load(V0_PATH, map_location=agent.device)
+        torch.load("weights/new_1v10_weights.pt", map_location=agent.device)
     )
     agent.policy_net.eval()
 

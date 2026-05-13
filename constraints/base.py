@@ -7,8 +7,9 @@ from abc import ABC, abstractmethod
     The constraint will be managed by the RewardManager."""
 
 class Constraint(ABC):
-    def __init__(self, penalty: float):
+    def __init__(self, penalty: float, termination: bool):
         self.penalty = penalty
+        self.termination = termination
 
     @abstractmethod
     def check(self, state):

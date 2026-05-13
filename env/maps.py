@@ -81,16 +81,20 @@ class GridMap:
         self.direction_map = direction_map
 
     def isObstacle(self, x: int, y: int):
+        """ Returns true if the cell (x, y) is occupied by an obstacle, false otherwise."""
         return self.obstacles[x, y] != 0
     
     def isTrafficLight(self, pos):
+        """ Returns true if the cell (x, y) is occupied by a traffic light, false otherwise."""
         x, y = pos
         return self.traffic_lights[x, y] != 0
     
     def getAllowedDirections(self, pos):
+        """ Returns the directions allowed in the given position (as bitmask). """
         x, y = pos
         return self.direction_map[x, y]
     
     def isRoad(self, x, y):
+        """ Returns true if the cell (x, y) is part of a road, false otherwise. """
         return self.direction_map[x, y]!=0
         

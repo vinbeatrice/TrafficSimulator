@@ -2,20 +2,19 @@ import torch
 import time
 import numpy as np
 from env.path_env import PathEnv
-from train.train import obs_to_array
 from agent.agent import DQNAgent
 from agent.dqn_model import DQNNet
 from env.maps import GridMap
 from config.env_config import FOV_H, FOV_W, RENDER_MODE_TEST, MAX_STEPS
-from config.paths import TEST_PATH
-from config.train_config import OBSTACLE_MAP, TL_MAP, DIRECTION_MAP, SAVE_PATH
+from config.paths import TEST_PATH, PATHS
+from config.train_config import OBSTACLE_MAP, TL_MAP, DIRECTION_MAP, SAVE_PATH, MULTI_PATH, NPC_PATH
 from config.agent_config import N_CHANNELS, N_ACTIONS
 
 # --- Config ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 map = GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP, direction_map=DIRECTION_MAP)
-env = PathEnv(grid_map=map, path=TEST_PATH, fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TEST, max_steps=MAX_STEPS)
+env = PathEnv(grid_map=map, path=PATHS[6], fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TEST, max_steps=MAX_STEPS, num_npc=10, npc_policy_path=NPC_PATH)
 print("ENV created")
 obs, _ = env.reset()
 #print(obs)
@@ -30,7 +29,7 @@ policy_net.load_state_dict(torch.load(SAVE_PATH, map_location=device))
 policy_net.eval()
 """
 agent = DQNAgent(env=env, n_obs=input_dim, n_actions=n_actions)
-agent.policy_net.load_state_dict(torch.load(SAVE_PATH, map_location=device))
+agent.policy_net.load_state_dict(torch.load("weights/1v5_weights_zero_idle_multi_path.pt", map_location=device))
 agent.policy_net.eval()
 agent.epsilon = 0.0
 
@@ -38,7 +37,7 @@ tot = 0
 done = False
 step = 0
 while not done:
-    state = obs_to_array(obs)
+    state = env.obs_to_array(obs)
     state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
 
     with torch.no_grad():
@@ -46,9 +45,9 @@ while not done:
 
 
     obs, reward, terminated, truncated, info = env.step(action)
+    #print(obs)
     tot += reward
     print("[STEP ",step, "] ACTION", action, "REWARD: ", reward," DONE: ", terminated or truncated)
-    #print(obs)
     time.sleep(0.6)
     step += 1
     done = terminated or truncated

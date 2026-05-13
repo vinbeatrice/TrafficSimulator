@@ -49,6 +49,7 @@ class DQNAgent:
         self.n_actions = n_actions
         self.step_count = 0
         self.grad_norms = []
+        self.losses = []
 
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -72,17 +73,22 @@ class DQNAgent:
         self.buffer = ReplayBuffer(capacity=buffer_size)
 
     # Select next action given current state
-    def select_action(self, state):
+    def select_action(self, state, greedy=False):
         self.step_count += 1
         #self.epsilon = max(self.final_epsilon, self.initial_epsilon - self.step_count / EPSILON_DECAY)
-
-        if np.random.rand() < self.epsilon: # exploration
-            return np.random.randint(0,self.n_actions)
-        else:
+        if greedy:
             state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
             with torch.no_grad():
                 q_values = self.policy_net(state_tensor)
             return int(q_values.argmax().item())
+        else:
+            if np.random.rand() < self.epsilon: # exploration
+                return np.random.randint(0,self.n_actions)
+            else:
+                state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
+                with torch.no_grad():
+                    q_values = self.policy_net(state_tensor)
+                return int(q_values.argmax().item())
     
 
     def store_transition(self, state, action, reward, next_state, done):
@@ -123,6 +129,7 @@ class DQNAgent:
 
         #loss = nn.MSELoss()(q_values, target)
         loss = nn.SmoothL1Loss()(q_values, target)
+        self.losses.append(loss.item())
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -142,7 +149,7 @@ class DQNAgent:
         """Reduce exploration rate after each episode."""
         self.epsilon = max(
             self.final_epsilon,
-            self.initial_epsilon - episode * (self.initial_epsilon - self.final_epsilon) / 45_000
+            self.initial_epsilon - episode * (self.initial_epsilon - self.final_epsilon) / 60_000
         )
 
         #self.epsilon = max(self.final_epsilon, self.initial_epsilon - self.step_count / EPSILON_DECAY)

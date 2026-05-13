@@ -20,7 +20,7 @@ def plot_learning_queue(episode_rewards):
         linewidth=2
     )
 
-    plt.xlabel("Episoded")
+    plt.xlabel("Episode")
     plt.ylabel("Total Reward")
     plt.title("Learning Curve")
     plt.legend()
