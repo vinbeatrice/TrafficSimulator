@@ -14,7 +14,7 @@ from config.agent_config import N_CHANNELS, N_ACTIONS
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 map = GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP, direction_map=DIRECTION_MAP)
-env = PathEnv(grid_map=map, path=PATHS[6], fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TEST, max_steps=MAX_STEPS, num_npc=10, npc_policy_path=NPC_PATH)
+env = PathEnv(grid_map=map, path=PATHS[4], fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TEST, max_steps=MAX_STEPS, num_npc=15, npc_policy_path=NPC_PATH)
 print("ENV created")
 obs, _ = env.reset()
 #print(obs)
@@ -22,14 +22,9 @@ obs, _ = env.reset()
 # --- Inizializza rete e carica pesi ---
 input_dim = FOV_W * FOV_H * N_CHANNELS
 n_actions = N_ACTIONS
-"""
-agent = DQNAgent(env=env,n_obs=input_dim, n_actions=n_actions)
-policy_net = DQNNet(n_obs=input_dim, n_actions=n_actions).to(agent.device)
-policy_net.load_state_dict(torch.load(SAVE_PATH, map_location=device))
-policy_net.eval()
-"""
+
 agent = DQNAgent(env=env, n_obs=input_dim, n_actions=n_actions)
-agent.policy_net.load_state_dict(torch.load("weights/1v5_weights_zero_idle_multi_path.pt", map_location=device))
+agent.policy_net.load_state_dict(torch.load("weights/proj_fov_1v10_weights.pt", map_location=device))
 agent.policy_net.eval()
 agent.epsilon = 0.0
 
@@ -37,6 +32,7 @@ tot = 0
 done = False
 step = 0
 while not done:
+    #print(obs)
     state = env.obs_to_array(obs)
     state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
 

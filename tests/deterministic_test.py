@@ -20,12 +20,14 @@ def test_right_lane_constraint():
         render_mode="human",
         grid_map=grid_map,
         path=path,
-        fov=(3, 3),
-        max_steps=100
+        fov=(5, 5),
+        max_steps=100,
+        num_npc=0
     )
 
     print("\nTEST")
     obs, _ = env.reset()
+    print(obs)
     time.sleep(1)
 
     actions = [
@@ -84,6 +86,7 @@ def test_right_lane_constraint():
     tot = 0
     for a in actions:
         obs, reward, _, _, _ = env.step(a)
+        print(obs)
         print("Reward:", reward)
         tot += reward
         time.sleep(0.4)
@@ -130,7 +133,7 @@ def test_one_way_constraint():
         render_mode="human",
         grid_map=grid_map,
         path=path,
-        fov=(3, 3),
+        fov=(5, 5),
         max_steps=10
     )
 

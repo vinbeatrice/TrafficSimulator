@@ -1,6 +1,7 @@
+import os
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 import torch
 import time
-import os
 import numpy as np
 from env.path_env import PathEnv
 from agent.agent import DQNAgent
@@ -23,7 +24,7 @@ def train(resume_from=None):
     # ---- Environment creation ----
     grid_map = GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP, direction_map=DIRECTION_MAP)
     #env = PathEnv(grid_map=grid_map, path=PATHS[0], fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TRAIN, max_steps=MAX_STEPS)
-    env = PathEnv(grid_map=grid_map, path=PATHS[0], fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TRAIN, max_steps=MAX_STEPS, num_npc=10, npc_policy_path=NPC_PATH)
+    env = PathEnv(grid_map=grid_map, path=PATHS[0], fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TRAIN, max_steps=MAX_STEPS, num_npc=15, npc_policy_path=NPC_PATH)
     print("[INFO] Environment created.")
     obs, _ = env.reset()
 
@@ -42,9 +43,12 @@ def train(resume_from=None):
     max_steps = MAX_STEPS
     episode_rewards = []
     episode_epsilons = []
-    reward_per_path = {i: [] for i in range(len(PATHS))}
+    #reward_per_path = {i: [] for i in range(len(PATHS))}
     global_steps = 0
     start_episode = 0
+    tl_total = 0
+    tl_other = 0
+    tl_stay = 0
 
     
     start_time = time.time()
@@ -52,8 +56,8 @@ def train(resume_from=None):
     for ep in range(start_episode, n_episodes):
 
         # ---- Path selection ----
-        path = PATHS[ep % len(PATHS)]
-        #path = generate_random_path_with_tl(grid_map)
+        #path = PATHS[ep % len(PATHS)]
+        path = generate_random_path_with_tl(grid_map)
         env.setPath(path)
 
         # Episode reset
@@ -61,10 +65,71 @@ def train(resume_from=None):
         state = env.obs_to_array(obs)
         total_reward = 0
 
+        last_action = None
+
         # ---- Episode start ----
         for t in range(max_steps):
+
             action = agent.select_action(state)
+            """
+            if last_action != None:
+                #-----------PROVA-------------
+                
+                next_pos = tuple(env.agent_pos + env._action_to_direction[last_action])
+
+                if next_pos in env.traffic_lights:
+                    light = env.traffic_lights[next_pos]
+
+                    if light.isRed(env.step_count) or light.isYellow(env.step_count):
+
+                        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
+
+                        with torch.no_grad():
+                            qvals = agent.policy_net(state_tensor).cpu().numpy()[0]
+
+                        actions = ["RIGHT", "UP", "LEFT", "DOWN", "STAY"]
+                        best_action = np.argmax(qvals)
+
+                        with open("traffic_debug.txt", "a") as f:
+                            f.write("\n========================\n")
+                            f.write(f"Episode: {ep}\n")
+                            f.write(f"Step: {env.step_count}\n")
+                            f.write(f"Agent pos: {env.agent_pos}\n")
+                            f.write(f"Light state: {light.get_state(env.step_count)}\n")
+
+                            for i, a in enumerate(actions):
+                                f.write(f"{a}: {qvals[i]:.4f}\n")
+
+                            f.write(f"Chosen action: {actions[action]}\n")
+                            f.write(f"Greedy action: {actions[best_action]}\n")
+                            f.write(f"Current reward: {total_reward}\n")
+                
+                #-------------------------------------
+            """
+            #---------------
+            next_path_pos = env.path[env.path_index] if env.path_index < len(env.path) else None
+            is_red_or_yellow = False
+            if next_path_pos is not None and next_path_pos in env.traffic_lights:
+                light = env.traffic_lights[next_path_pos]
+                if light.isRed(env.step_count) or light.isYellow(env.step_count):
+                    is_red_or_yellow = True
+
+            # traccia
+            if is_red_or_yellow:
+                tl_total += 1
+                if action == 4:  # STAY
+                    tl_stay += 1
+                else:
+                    tl_other += 1
+            
+            if ep % 1000 == 0:
+                print(f"TL situations: {tl_total} | STAY: {tl_stay} | Other: {tl_other}")
+
+            #---------------
+
             next_obs, reward, done, truncated, _ = env.step(action)
+            last_action = action
+
             
             next_state = env.obs_to_array(next_obs)
             done_flag = done or truncated
@@ -86,7 +151,7 @@ def train(resume_from=None):
         episode_rewards.append(total_reward)
 
         episode_epsilons.append(agent.epsilon)
-        reward_per_path[ep % len(PATHS)].append(total_reward)
+        #reward_per_path[ep % len(PATHS)].append(total_reward)
 
         
         if len(episode_rewards) >= 100:
@@ -104,7 +169,7 @@ def train(resume_from=None):
     print(f"\n[INFO] Training time: {total_time:.2f} sec ({total_time/60:.2f} min)")
 
     # save weights
-    torch.save(agent.policy_net.state_dict(), "weights/1v10_weights_zero_idle_multi_path.pt")
+    torch.save(agent.policy_net.state_dict(), "weights/proj_fov_1v15_weights.pt")
 
 
     # ---- Plots ----
@@ -113,9 +178,9 @@ def train(resume_from=None):
     plot_epsilon(epsilons=episode_epsilons)
     plot_gradient_norm(agent.grad_norms)
     plot_loss(agent.losses)
-    plot_all_paths(reward_per_path=reward_per_path)
+    #plot_all_paths(reward_per_path=reward_per_path)
 
-    print(f"[INFO] Weight saved in 1v10_weights_zero_idle_multi_path.pt")
+    print(f"[INFO] Weight saved in proj_fov_1v15_weights.pt")
 
 if __name__ == "__main__":
     train()

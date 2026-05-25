@@ -121,9 +121,7 @@ class DQNAgent:
         with torch.no_grad():
 
             next_actions = self.policy_net(next_states).argmax(1)
-            next_q = self.target_net(next_states).gather(
-                1, next_actions.unsqueeze(1)
-            ).squeeze(1)
+            next_q = self.target_net(next_states).gather(1, next_actions.unsqueeze(1)).squeeze(1)
 
             target = rewards + self.gamma * next_q * (1 - dones)
 
@@ -149,7 +147,7 @@ class DQNAgent:
         """Reduce exploration rate after each episode."""
         self.epsilon = max(
             self.final_epsilon,
-            self.initial_epsilon - episode * (self.initial_epsilon - self.final_epsilon) / 60_000
+            self.initial_epsilon - episode * (self.initial_epsilon - self.final_epsilon) / 85_000
         )
 
         #self.epsilon = max(self.final_epsilon, self.initial_epsilon - self.step_count / EPSILON_DECAY)

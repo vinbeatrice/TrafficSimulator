@@ -1,10 +1,10 @@
 import numpy as np
 from env.directions import Direction, DIR_TO_VEC
-from config.env_config import FOV_H, FOV_W
+from config.env_config import FOV_H, FOV_W, ALERT_H, ALERT_W
 import random
 
 
-def getFOV_with_layers(agent_pos, grid_map, traffic_lights, step_count, fov_w=FOV_W, fov_h=FOV_H):
+def getFOV_with_layers(agent_pos, grid_map, traffic_lights, step_count, fov_w=FOV_W, fov_h=FOV_H, alert_w=ALERT_W, alert_h=ALERT_H):
     
     """
     Compute layers contained in fov based on current agent position and direction.
@@ -12,6 +12,10 @@ def getFOV_with_layers(agent_pos, grid_map, traffic_lights, step_count, fov_w=FO
 
     W, H = grid_map.W, grid_map.H
     ax, ay = agent_pos
+
+    # ===================
+    # --- NORMAL FOV ---
+    # ===================
 
     xmin = max(0, ax - fov_h // 2)
     ymin = max(0, ay - fov_w // 2)
@@ -38,6 +42,39 @@ def getFOV_with_layers(agent_pos, grid_map, traffic_lights, step_count, fov_w=FO
 
             # Allowed directions (bitmask)
             allowed_dirs[rx, ry] = grid_map.direction_map[x, y]
+
+    # ===================
+    # --- PROJECTION ---
+    # ===================
+
+    alert_xmin = max(0, ax - alert_h // 2)
+    alert_ymin = max(0, ay - alert_w // 2)
+    alert_xmax = min(H - 1, ax + alert_h // 2)
+    alert_ymax = min(W - 1, ay + alert_w // 2)
+
+    for x in range(alert_xmin, alert_xmax + 1):
+        for y in range(alert_ymin, alert_ymax + 1):
+
+            # skip central real 3x3
+            if ax - 1 <= x <= ax + 1 and ay - 1 <= y <= ay + 1:
+                continue
+            
+            if not grid_map.isObstacle(x, y):
+                continue
+
+            dx = x - ax
+            dy = y - ay
+
+            # projection onto 5x5 border
+            proj_x = np.clip(dx, -2, 2) + 2
+            proj_y = np.clip(dy, -2, 2) + 2
+
+            # skip internal 3x3
+            if 1 <= proj_x <= 3 and 1 <= proj_y <= 3:
+                continue
+
+            obstacles[proj_x, proj_y] = 1.0
+
 
     return {
         "obstacles": obstacles,

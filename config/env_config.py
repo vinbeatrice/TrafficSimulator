@@ -1,8 +1,10 @@
 """ Global constants reguarding the environment """
 
 # FOV size
-FOV_W = 3
-FOV_H = 3
+FOV_W = 5
+FOV_H = 5
+ALERT_W = 9
+ALERT_H = 9
 
 MAX_STEPS = 150
 

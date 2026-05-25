@@ -16,7 +16,7 @@ from env.directions import Direction, ALL_DIRECTIONS
 
 from config.penalty_config import COLLISION_PENALTY, TRAFFIC_LIGHT_PENALTY, LANE_PENALTY, USELESS_STEP_PENALTY, IDLE_PENALTY
 from config.traffic_lights import TL_GROUPS
-from config.env_config import FOV_H, FOV_W
+from config.env_config import FOV_H, FOV_W, ALERT_H, ALERT_W
 from utils.helpers import getTrajectoryinFOV, getFOV_with_layers, generate_random_path
 
 """A simple Gym environment where an agent must learn to follow a chosen path on a 2D grid.
@@ -38,7 +38,7 @@ class Actions(Enum):
 class PathEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 4}
     
-    def __init__(self, render_mode=None, grid_map: GridMap=None, path=None, fov=(3,3), max_steps=150, num_npc=0, npc_policy_path=None):
+    def __init__(self, render_mode=None, grid_map: GridMap=None, path=None, fov=(FOV_H,FOV_W), max_steps=150, num_npc=0, npc_policy_path=None):
         
         # check that there's a map
         assert grid_map is not None
@@ -76,10 +76,6 @@ class PathEnv(gym.Env):
         self.path_index_map = {pos: i for i, pos in enumerate(self.path)} #{position → path index}
         self.step_count = 0
         self.fov_h, self.fov_w = fov
-        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
-        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, start_idx=self.path_index)
-        self.car_images = None
-
         # ---- NPC CONFIG ----
         self.num_npc = num_npc
         self.npcs = []
@@ -106,6 +102,11 @@ class PathEnv(gym.Env):
             for p in self.npc_policy.policy_net.parameters():
                 p.requires_grad = False
         
+        self.fov_data = self.getFOV_with_layers(agent_pos=self.agent_pos)
+        self.trajectory_in_fov = self.getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, agent_pos=self.agent_pos, start_idx=self.path_index)
+        self.car_images = None
+
+    
         # ---------- CONSTRAINTS ----------
         self.reward_manager = RewardManager()
         self.reward_manager.add_constraint(CollisionConstraint(penalty=COLLISION_PENALTY, termination=True))
@@ -168,19 +169,6 @@ class PathEnv(gym.Env):
             "allowed_dirs": self.fov_data["allowed_dirs"]
         }
 
-        if self.num_npc > 0:
-            fov = self.fov_data["fov_bounds"]
-            x_min, y_min = fov[0]
-            x_max, y_max = fov[1]
-
-            for npc in self.npcs:
-                nx, ny = npc["pos"]
-
-                rx = nx - x_min
-                ry = ny - y_min
-
-                if 0 <= rx < self.fov_h and 0 <= ry < self.fov_w:
-                    obs["obstacles"][rx, ry] = 1
 
         return obs
     
@@ -260,8 +248,8 @@ class PathEnv(gym.Env):
         self.path_index = 1
         self.step_count = 0
         self.idle_steps = 0
-        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
-        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, start_idx=self.path_index)
+        self.fov_data = self.getFOV_with_layers(agent_pos=self.agent_pos)
+        self.trajectory_in_fov = self.getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, agent_pos = self.agent_pos, start_idx=self.path_index)
 
         observation = self._get_obs()
         info = {} # not defined _get_info()
@@ -269,10 +257,18 @@ class PathEnv(gym.Env):
 
         # ---- NPC RESET ----
         self.npcs = []
+        occupied = {tuple(self.agent_pos)}
 
         if self.num_npc > 0:
             for _ in range(self.num_npc):
-                npc_path = generate_random_path(self.map, max_length=60)
+                npc_path = []
+                while True:
+                    npc_path = generate_random_path(self.map, max_length=60)
+                    start_pos = tuple(npc_path[0])
+                    if start_pos not in occupied:
+                        occupied.add(start_pos)
+                        break
+
 
                 npc = {
                     "pos": np.array(npc_path[0], dtype=np.int32),
@@ -326,7 +322,7 @@ class PathEnv(gym.Env):
             pass
 
         # Update FOV and trajectory in FOV
-        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
+        self.fov_data = self.getFOV_with_layers(agent_pos=self.agent_pos)
 
         terminated = False
         new_pos_tuple = (int(new_pos[0]), int(new_pos[1])) # convert to tuple for comparison
@@ -359,8 +355,8 @@ class PathEnv(gym.Env):
 
 
         # Update FOV and trajectory in FOV
-        self.fov_data = getFOV_with_layers(agent_pos=self.agent_pos, fov_w=self.fov_w, fov_h=self.fov_h, grid_map=self.map, traffic_lights=self.traffic_lights, step_count=self.step_count)
-        self.trajectory_in_fov = getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, start_idx=self.path_index)
+        self.fov_data = self.getFOV_with_layers(agent_pos=self.agent_pos)
+        self.trajectory_in_fov = self.getTrajectoryinFOV(self.fov_data["fov_bounds"], self.path, agent_pos=self.agent_pos, start_idx=self.path_index)
 
         # If agent looses track of the path, terminate episode
         if np.sum(self.trajectory_in_fov) == 0:
@@ -428,18 +424,12 @@ class PathEnv(gym.Env):
     
     def _get_obs_for_npc(self, npc):
 
-        fov_data = getFOV_with_layers(
-            agent_pos=npc["pos"],
-            fov_w=self.fov_w,
-            fov_h=self.fov_h,
-            grid_map=self.map,
-            traffic_lights=self.traffic_lights,
-            step_count=self.step_count
-        )
+        fov_data = self.getFOV_with_layers(agent_pos=npc["pos"], ignore_npc=npc)
 
-        traj = getTrajectoryinFOV(
+        traj = self.getTrajectoryinFOV(
             fov_data["fov_bounds"],
             npc["path"],
+            agent_pos=npc["pos"],
             start_idx=npc["path_index"]
         )
 
@@ -447,25 +437,17 @@ class PathEnv(gym.Env):
         fov = fov_data["fov_bounds"]
         x_min, y_min = fov[0]
 
-        # agente come ostacolo
+        # agent as obstacle
         ax, ay = self.agent_pos
-        rx = ax - x_min
-        ry = ay - y_min
+        nx, ny = npc["pos"]
+        fix_x = nx - self.fov_h //2
+        fix_y = ny - self.fov_w //2
+        rx = ax - fix_x
+        ry = ay - fix_y
 
         if 0 <= rx < self.fov_h and 0 <= ry < self.fov_w:
             fov_data["obstacles"][rx, ry] = 1
 
-        # altri NPC
-        for other in self.npcs:
-            if other is npc:
-                continue
-
-            ox, oy = other["pos"]
-            rx = ox - x_min
-            ry = oy - y_min
-
-            if 0 <= rx < self.fov_h and 0 <= ry < self.fov_w:
-                fov_data["obstacles"][rx, ry] = 1
 
         return {
             "fov": np.array(fov_data["fov_bounds"]),
@@ -474,6 +456,168 @@ class PathEnv(gym.Env):
             "traffic_lights": fov_data["traffic_lights"],
             "allowed_dirs": fov_data["allowed_dirs"]
         }
+
+        
+    def getFOV_with_layers(self, agent_pos, ignore_npc=None, alert_w=ALERT_W, alert_h=ALERT_H):
+        
+        """
+        Compute layers contained in fov based on current agent position and direction.
+        """
+
+        W, H = self.W, self.H
+        fov_w = self.fov_w
+        fov_h = self.fov_h
+        ax, ay = agent_pos
+        grid_map = self.map
+        traffic_lights = self.traffic_lights
+        step_count = self.step_count
+
+        # ===================
+        # --- NORMAL FOV ---
+        # ===================
+
+        xmin = max(0, ax - fov_h // 2)
+        ymin = max(0, ay - fov_w // 2)
+        xmax = min(H - 1, ax + fov_h // 2)
+        ymax = min(W - 1, ay + fov_w // 2)
+        fix_x = ax - fov_h // 2
+        fix_y = ay - fov_w // 2
+
+        # --- Allocate layers ---
+        obstacles = np.zeros((fov_h, fov_w), dtype=np.float32)
+        traffic = np.zeros((fov_h, fov_w), dtype=np.float32)
+        allowed_dirs = np.zeros((fov_h, fov_w), dtype=np.int32)
+        
+        if self.num_npc > 0:
+            for npc in self.npcs:
+                if npc is ignore_npc:
+                    continue
+                
+                nx, ny = npc["pos"]
+
+                rx = nx - fix_x
+                ry = ny - fix_y
+
+                if 0 <= rx < self.fov_h and 0 <= ry < self.fov_w:
+                    obstacles[rx, ry] = 1
+
+        for x in range(xmin, xmax + 1):
+            for y in range(ymin, ymax + 1):
+                rx, ry = x - fix_x, y - fix_y
+
+                # obstacles
+                if grid_map.obstacles[x, y] == 1:
+                    obstacles[rx, ry] = 1.0
+                
+                # traffic lights
+                if (x, y) in traffic_lights:
+                    state = traffic_lights[(x, y)].get_state(step_count)
+                    traffic[rx, ry] = state.value
+
+                # Allowed directions (bitmask)
+                allowed_dirs[rx, ry] = grid_map.direction_map[x, y]
+        
+
+        # ===================
+        # --- PROJECTION ---
+        # ===================
+
+        alert_xmin = max(0, ax - alert_h // 2)
+        alert_ymin = max(0, ay - alert_w // 2)
+        alert_xmax = min(H - 1, ax + alert_h // 2)
+        alert_ymax = min(W - 1, ay + alert_w // 2)
+
+        for x in range(alert_xmin, alert_xmax + 1):
+            for y in range(alert_ymin, alert_ymax + 1):
+
+                # skip central real 3x3
+                if ax - 1 <= x <= ax + 1 and ay - 1 <= y <= ay + 1:
+                    continue
+
+
+                # Project NPCs
+                for npc in self.npcs:
+                    if npc is ignore_npc:
+                        continue
+                    nx, ny = npc["pos"]
+
+                    if nx==x and ny==y:
+                        dx = x - ax
+                        dy = y - ay
+
+                        cx = self.fov_h // 2
+                        cy = self.fov_w // 2
+
+                        # projection onto 5x5 border
+                        proj_x = np.clip(dx, -cx, cx) + cx
+                        proj_y = np.clip(dy, -cy, cy) + cy
+
+                        # skip internal 3x3
+                        if 1 <= proj_x <= 3 and 1 <= proj_y <= 3:
+                            continue
+
+                        obstacles[proj_x, proj_y] = 1.0
+
+
+                # Project obstacles
+                """
+                if grid_map.isObstacle(x, y):
+                    dx = x - ax
+                    dy = y - ay
+
+                    # projection onto 5x5 border
+                    proj_x = np.clip(dx, -2, 2) + 2
+                    proj_y = np.clip(dy, -2, 2) + 2
+
+                    # skip internal 3x3
+                    if 1 <= proj_x <= 3 and 1 <= proj_y <= 3:
+                        continue
+
+                    obstacles[proj_x, proj_y] = 1.0
+                """
+
+
+        return {
+            "obstacles": obstacles,
+            "traffic_lights": traffic,
+            "allowed_dirs": allowed_dirs,
+            "fov_bounds": ((xmin, ymin), (xmax, ymax))
+        }
+
+        
+
+    def getTrajectoryinFOV(self, fov, path, agent_pos, start_idx=0, max_steps_ahead=5):
+        """ Get the visible portion of the trajectory within the agent field of view and
+            return it as a binary matrix where 1s represent the path to follow."""
+        trajectory_in_fov = []
+
+        fov_w = self.fov_w
+        fov_h = self.fov_h
+        ax, ay = agent_pos
+        fix_x = ax - fov_h // 2
+        fix_y = ay - fov_w // 2
+        x_min, y_min = fov[0]
+        x_max, y_max = fov[1]
+        
+        end_idx = min(start_idx + max_steps_ahead, len(path)) # to avoid to see too much in the future trace
+
+        for pos in path[start_idx:end_idx]:
+            x, y = pos
+
+            if x_min <= x <= x_max and y_min <= y <= y_max:
+                # global to local conversion
+                local_x = x - fix_x
+                local_y = y - fix_y
+
+                trajectory_in_fov.append((local_x, local_y))
+        
+        # --- Trajectory map ---
+        traj_map = np.zeros((fov_h, fov_w), dtype=np.float32)
+        for x, y in trajectory_in_fov:
+            if 0 <= x < fov_h and 0 <= y < fov_w:
+                traj_map[x, y] = 1.0
+
+        return traj_map
     
     def setPath(self, path):
         """Function that changes the path that the agent must follow"""

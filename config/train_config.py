@@ -2,7 +2,7 @@ import numpy as np
 from env.directions import Direction, ALL_DIRECTIONS
 """ Global constants used in training """
 
-NUM_EPISODES = 80_000
+NUM_EPISODES = 100_000
 BATCH_SIZE = 64
 GAMMA = 0.99
 
@@ -17,7 +17,7 @@ REPLAY_BUFFER_SIZE = 50_000
 SAVE_PATH = "weights/dqn_final_weights.pt"
 MULTI_PATH = "weights/dqn_multi_agent_final_weights.pt"
 
-NPC_PATH = "weights/1v5_weights_zero_idle_multi_path.pt"
+NPC_PATH = "weights/proj_fov_1v10_weights.pt"
 
 
 

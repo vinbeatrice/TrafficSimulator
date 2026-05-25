@@ -40,6 +40,7 @@ def oracle_action(env):
 def run_episode(env, agent=None, use_oracle=False):
 
     obs, _ = env.reset()
+    print(obs)
     #if not use_oracle:
         #print(obs)
     state = env.obs_to_array(obs)
@@ -84,21 +85,18 @@ def evaluate_agent(env, agent, n_paths=100, max_length=20):
         env.setPath(path)
 
         # Oracle baseline
-        oracle_reward, oracle_success = run_episode(env, use_oracle=True)
+        #oracle_reward, oracle_success = run_episode(env, use_oracle=True)
 
         # Agent performance
         agent_reward, agent_success = run_episode(env, agent=agent)
 
         results.append({
-            "oracle_reward": oracle_reward,
             "agent_reward": agent_reward,
-            "oracle_success": oracle_success,
             "agent_success": agent_success,
         })
 
         print(
             f"[{i}] "
-            f"oracle: {oracle_reward:.2f} ({oracle_success}) | "
             f"agent: {agent_reward:.2f} ({agent_success})"
         )
 
@@ -161,14 +159,14 @@ def main():
 
     # ⚠️ CARICA PESI
     agent.policy_net.load_state_dict(
-        torch.load("weights/new_1v10_weights.pt", map_location=agent.device)
+        torch.load("weights/proj_fov_1v5_weights.pt", map_location=agent.device)
     )
     agent.policy_net.eval()
 
     # --- EVALUATION ---
     results = evaluate_agent(env, agent, n_paths=1000)
 
-    summarize_results(results)
+    #summarize_results(results)
 
 
 if __name__ == "__main__":
