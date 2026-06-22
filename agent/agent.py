@@ -75,7 +75,7 @@ class DQNAgent:
     # Select next action given current state
     def select_action(self, state, greedy=False):
         self.step_count += 1
-        #self.epsilon = max(self.final_epsilon, self.initial_epsilon - self.step_count / EPSILON_DECAY)
+        #self.epsilon = max(self.final_epsilon, self.initial_epsilon - self.step_count / EPSILON_DECAY) # epsilon decay per step
         if greedy:
             state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
             with torch.no_grad():
@@ -126,7 +126,7 @@ class DQNAgent:
             target = rewards + self.gamma * next_q * (1 - dones)
 
         #loss = nn.MSELoss()(q_values, target)
-        loss = nn.SmoothL1Loss()(q_values, target)
+        loss = nn.SmoothL1Loss()(q_values, target) # Huber loss
         self.losses.append(loss.item())
 
         self.optimizer.zero_grad()
@@ -150,4 +150,3 @@ class DQNAgent:
             self.initial_epsilon - episode * (self.initial_epsilon - self.final_epsilon) / 85_000
         )
 
-        #self.epsilon = max(self.final_epsilon, self.initial_epsilon - self.step_count / EPSILON_DECAY)

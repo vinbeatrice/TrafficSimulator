@@ -5,9 +5,10 @@ from env.path_env import PathEnv
 from env.maps import GridMap
 from agent.agent import DQNAgent
 from utils.helpers import generate_random_path, generate_random_path_with_tl
+from tests.baseline import baseline_policy
 
 from config.env_config import FOV_W, FOV_H, MAX_STEPS
-from config.train_config import OBSTACLE_MAP, TL_MAP, DIRECTION_MAP, SAVE_PATH, MULTI_PATH
+from config.train_config import OBSTACLE_MAP, TL_MAP, DIRECTION_MAP, SAVE_PATH, MULTI_PATH, NPC_PATH
 from config.agent_config import N_CHANNELS
 
 
@@ -40,37 +41,46 @@ def oracle_action(env):
 def run_episode(env, agent=None, use_oracle=False):
 
     obs, _ = env.reset()
-    print(obs)
-    #if not use_oracle:
-        #print(obs)
     state = env.obs_to_array(obs)
 
     total_reward = 0
     done = False
     truncated = False
 
+    # baseline internal state
+    policy_state = {
+        "overtake_mode": False,
+        "overtake_entry_action": None,
+        "overtake_forward_action": None,
+        "overtake_progress": 0
+    }
+
     while not (done or truncated):
 
         if use_oracle:
-            action = oracle_action(env)
+            action, policy_state = baseline_policy(obs, policy_state)
+
         else:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
+            state_tensor = torch.tensor(
+                state,
+                dtype=torch.float32
+            ).unsqueeze(0).to(device)
+
             with torch.no_grad():
                 action = agent.policy_net(state_tensor).argmax().item()
 
         next_obs, reward, done, truncated, _ = env.step(action)
-        #if not use_oracle:
-        #    print(action)
-        #    print(next_obs)
+
+        obs = next_obs
         state = env.obs_to_array(next_obs)
 
         total_reward += reward
+
     print("DONE")
     success = env.path_index >= len(env.path)
 
     return total_reward, success
-
 
 # =========================
 # EVALUATION LOOP
@@ -85,7 +95,9 @@ def evaluate_agent(env, agent, n_paths=100, max_length=20):
         env.setPath(path)
 
         # Oracle baseline
-        #oracle_reward, oracle_success = run_episode(env, use_oracle=True)
+        oracle_reward, oracle_success = run_episode(env, use_oracle=True)
+
+        env.setPath(path)
 
         # Agent performance
         agent_reward, agent_success = run_episode(env, agent=agent)
@@ -143,8 +155,8 @@ def main():
         fov=(FOV_W, FOV_H),
         max_steps=MAX_STEPS,
         render_mode="human",
-        num_npc=0,
-        npc_policy_path=None
+        num_npc=15,
+        npc_policy_path=NPC_PATH
     )
 
     # --- AGENT ---
@@ -159,14 +171,14 @@ def main():
 
     # ⚠️ CARICA PESI
     agent.policy_net.load_state_dict(
-        torch.load("weights/proj_fov_1v5_weights.pt", map_location=agent.device)
+        torch.load("weights/proj_aware_1v15_weights.pt", map_location=agent.device)
     )
     agent.policy_net.eval()
 
     # --- EVALUATION ---
     results = evaluate_agent(env, agent, n_paths=1000)
 
-    #summarize_results(results)
+    summarize_results(results)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,5 @@
+""" Traffic lights groups based on synchronization. """
+
 TL_GROUPS = {
     1: {"green": 3, "yellow": 1, "red": 4, "offset": 0},
     2: {"green": 3, "yellow": 1, "red": 4, "offset": 4},  # alternato a 1

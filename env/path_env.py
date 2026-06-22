@@ -4,6 +4,7 @@ import numpy as np
 import pygame
 from enum import Enum
 import os
+import torch
 
 #from maps import GridMap
 from constraints.reward_manager import RewardManager
@@ -17,7 +18,8 @@ from env.directions import Direction, ALL_DIRECTIONS
 from config.penalty_config import COLLISION_PENALTY, TRAFFIC_LIGHT_PENALTY, LANE_PENALTY, USELESS_STEP_PENALTY, IDLE_PENALTY
 from config.traffic_lights import TL_GROUPS
 from config.env_config import FOV_H, FOV_W, ALERT_H, ALERT_W
-from utils.helpers import getTrajectoryinFOV, getFOV_with_layers, generate_random_path
+from utils.helpers import generate_random_path
+
 
 """A simple Gym environment where an agent must learn to follow a chosen path on a 2D grid.
    - Skill: Follow a predefined path on a grid without deviations
@@ -34,6 +36,7 @@ class Actions(Enum):
     DOWN = 3
     STAY = 4
 
+from tests.baseline import baseline_policy
 
 class PathEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 4}
@@ -71,6 +74,7 @@ class PathEnv(gym.Env):
     
         # variables initialization
         self.agent_pos = np.array(self.path[0], dtype=np.int32)  # array([x, y])
+        self.position_history = [tuple(self.agent_pos)]
         self.agent_dir = None
         self.path_index = 1
         self.path_index_map = {pos: i for i, pos in enumerate(self.path)} #{position → path index}
@@ -88,11 +92,7 @@ class PathEnv(gym.Env):
             n_obs = self.fov_w * self.fov_h * 4
             n_actions = 5
 
-            self.npc_policy = DQNAgent(
-                env=self,
-                n_obs=n_obs,
-                n_actions=n_actions
-            )
+            self.npc_policy = DQNAgent(env=self, n_obs=n_obs, n_actions=n_actions)
 
             self.npc_policy.policy_net.load_state_dict(
                 torch.load(npc_policy_path, map_location=self.npc_policy.device)
@@ -121,7 +121,7 @@ class PathEnv(gym.Env):
         self.observation_space = gym.spaces.Dict(
             {
                 "trajectory": spaces.Box(low=0, high=1, shape=(self.fov_h, self.fov_w), dtype=np.int8), # trajectory (0=normal cell, 1=trace to follow)
-                "obstacles": spaces.Box(low=0, high=1, shape=(self.fov_h, self.fov_w), dtype=np.int8), #obstacles layer (0=free, 1=obstacle)
+                "obstacles": spaces.Box(low=0, high=5, shape=(self.fov_h, self.fov_w), dtype=np.int8), #obstacles layer (0=free, 1=obstacle, 2-5 = movements)
                 "traffic_lights": spaces.Box(low=0, high=3, shape=(self.fov_h, self.fov_w), dtype=np.int8), # traffic lights layer (0=none, 1=green, 2=yellow, 3=red)
                 "allowed_dirs": spaces.Box(low=0, high=15, shape=(self.fov_h, self.fov_w), dtype=np.int8) # allowed directions layer
             }
@@ -173,6 +173,7 @@ class PathEnv(gym.Env):
         return obs
     
     def _get_state(self):
+        """Returns the current state of the envinronment."""
         return {
             "agent_pos": (int(self.agent_pos[0]), int(self.agent_pos[1])),
             "agent_dir": self.agent_dir,
@@ -195,8 +196,8 @@ class PathEnv(gym.Env):
         traj_map = obs["trajectory"].astype(np.float32)
 
         # --- Obstacle map ---
-        obstacle_map = obs["obstacles"].astype(np.float32)
-
+        # normalize: 0–5 → 0–1
+        obstacle_map = obs["obstacles"].astype(np.float32) / 5.0
         # --- Traffic lights map ---
         # normalize: 0–3 → 0–1
         traffic_map = obs["traffic_lights"].astype(np.float32) / 3.0
@@ -226,6 +227,8 @@ class PathEnv(gym.Env):
 
         # Reset agent position
         self.agent_pos = np.array(self.path[0], dtype=np.int32)
+        self.agent_prev_pos = self.agent_pos.copy()
+        self.position_history = [tuple(self.agent_pos)]
 
         # Reset agent direction
         if len(self.path) > 1:
@@ -272,11 +275,18 @@ class PathEnv(gym.Env):
 
                 npc = {
                     "pos": np.array(npc_path[0], dtype=np.int32),
+                    "prev_pos": np.array(npc_path[0], dtype=np.int32),
                     "path": npc_path,
                     "path_index": 1,
                     "path_index_map": {pos: i for i, pos in enumerate(npc_path)},
                     "dir": Direction.UP,
-                    "done": False
+                    "done": False,
+                    "policy_state": {
+                        "overtake_mode": False,
+                        "overtake_entry_action": None,
+                        "overtake_forward_action": None,
+                        "overtake_progress": 0
+                    }
                 }
 
                 self.npcs.append(npc)
@@ -301,14 +311,17 @@ class PathEnv(gym.Env):
 
         # ---- MOVE NPCs ----
         if self.num_npc > 0:
-            for npc in self.npcs:
-                self._move_npc(npc)
+            self._move_all_npcs()
 
         # ---- MOVE Agent ----
         # Update agent position and direction
         new_pos = self.agent_pos + direction
         new_pos = np.clip(new_pos, [0, 0], [self.H - 1, self.W - 1]).astype(np.int32) # Ensure agent stays within grid bounds
+        self.agent_prev_pos = self.agent_pos.copy()
         self.agent_pos = new_pos
+
+        # Add to position history
+        self.position_history.append(tuple(self.agent_pos))
 
         if action == Actions.RIGHT.value:
             self.agent_dir = Direction.RIGHT
@@ -326,6 +339,20 @@ class PathEnv(gym.Env):
 
         terminated = False
         new_pos_tuple = (int(new_pos[0]), int(new_pos[1])) # convert to tuple for comparison
+
+        # Keep position hisoty of 4 elements
+        if len(self.position_history) > 4:
+            self.position_history.pop(0)
+
+        # Terminate if the agent moves back and forward between two positions
+        """
+        if len(self.position_history) == 4:
+           p0, p1, p2, p3 = self.position_history
+
+            if p0 == p2 and p1 == p3 and p0 != p1:
+                terminated = True
+        """
+        
 
         
         reward = 0.0
@@ -346,12 +373,10 @@ class PathEnv(gym.Env):
             reward += USELESS_STEP_PENALTY
         
         
-        self.idle_steps += 1 if action == Actions.STAY.value else 0
         if action == Actions.STAY.value:
             reward = IDLE_PENALTY # Note: we overwrite possible useless step penalty in case of stay action, otherwise the agente receives a larger penalty for staying idle in front of a traffic light wrt move continuously
 
         self.step_count += 1
-
 
 
         # Update FOV and trajectory in FOV
@@ -381,28 +406,84 @@ class PathEnv(gym.Env):
         info = {}
         
         return observation, reward, terminated, truncated, info
+
+    def _move_all_npcs(self):
+        """ Method that handles the movement of all NPCs, collecting their observations and
+        selecting the corresponding action according to their policy. """
+
+        if self.npc_policy is None: # NPCs use baseline as policy (ideal behaviour)
+            for npc in self.npcs:
+                if npc["done"]:
+                    continue
+
+                obs = self._get_obs_for_npc(npc)
+
+                action, npc["policy_state"] = baseline_policy(obs, npc["policy_state"])
+
+                self._move_npc(npc, action)
+
+        else: # NPCs use loaded policy
+
+            active_npcs = []
+            states = []
+
+            # ------------------------
+            # Build observations
+            # ------------------------
+
+            for npc in self.npcs:
+
+                if npc["done"]:
+                    continue
+
+                obs = self._get_obs_for_npc(npc)
+
+                # ---- NPC failed: lost path ----
+                if np.sum(obs["trajectory"]) == 0:
+                    npc["done"] = True
+                    npc["prev_pos"] = npc["pos"].copy() 
+                    continue
+                #print(obs)
+                #print(npc["path"])
+                state = self.obs_to_array(obs)
+
+                active_npcs.append(npc)
+                states.append(state)
+
+            if len(states) == 0:
+                return
+
+            # ------------------------
+            # Batch inference
+            # ------------------------
+
+            states_tensor = torch.tensor(
+                np.array(states),
+                dtype=torch.float32,
+                device=self.npc_policy.device
+            )
+
+            with torch.no_grad():
+                qvals = self.npc_policy.policy_net(states_tensor)
+                actions = qvals.argmax(dim=1).cpu().numpy()
+
+            # ------------------------
+            # Apply actions
+            # ------------------------
+
+            for npc, action in zip(active_npcs, actions):
+                self._move_npc(npc, int(action))
     
-    def _move_npc(self, npc):
-        """Function implementing the NPC logic, that acts following a loaded policy and stops once reached its goal."""
+    def _move_npc(self, npc, action):
+        """Function executing the specified action for the specified npc, updating its
+        current and previous positions, direction and its progress on the path."""
 
-        if self.npc_policy is None or npc["done"]:
-            return
-
-        # ---- stop if reached goal ----
-        if npc["path_index"] >= len(npc["path"]):
-            npc["done"] = True
-            return
-
-        # ---- build obs ----
-        obs = self._get_obs_for_npc(npc)
-        state = self.obs_to_array(obs)
-
-        action = self.npc_policy.select_action(state, greedy=True)
 
         direction = self._action_to_direction[action]
         new_pos = npc["pos"] + direction
         new_pos = np.clip(new_pos, [0, 0], [self.H - 1, self.W - 1])
 
+        npc["prev_pos"] = npc["pos"].copy()
         npc["pos"] = new_pos
 
         # ---- direction ----
@@ -423,6 +504,8 @@ class PathEnv(gym.Env):
             npc["path_index"] = idx + 1
     
     def _get_obs_for_npc(self, npc):
+        """ Method to compute the observation of a specific NPC. It differs from _get_obs for
+        considering the agent itself as an obstacle and ignore the NPC for which the observation is computed."""
 
         fov_data = self.getFOV_with_layers(agent_pos=npc["pos"], ignore_npc=npc)
 
@@ -433,11 +516,12 @@ class PathEnv(gym.Env):
             start_idx=npc["path_index"]
         )
 
+
         # ---- inject dynamic obstacles ----
         fov = fov_data["fov_bounds"]
         x_min, y_min = fov[0]
 
-        # agent as obstacle
+        # inject agent
         ax, ay = self.agent_pos
         nx, ny = npc["pos"]
         fix_x = nx - self.fov_h //2
@@ -446,11 +530,23 @@ class PathEnv(gym.Env):
         ry = ay - fix_y
 
         if 0 <= rx < self.fov_h and 0 <= ry < self.fov_w:
-            fov_data["obstacles"][rx, ry] = 1
+            agent_motion = self.encode_npc_motion(self.agent_prev_pos, self.agent_pos)
+            fov_data["obstacles"][rx, ry] = agent_motion
+        else:
+            dx = ax - nx
+            dy = ay - ny
+
+            cx = self.fov_h // 2
+            cy = self.fov_w // 2
+            if (abs(dx) <= ALERT_H // 2 and abs(dy) <= ALERT_W // 2):
+                proj_x = np.clip(dx, -cx, cx) + cx
+                proj_y = np.clip(dy, -cy, cy) + cy
+                if not (1 <= proj_x <= 3 and 1 <= proj_y <= 3):
+                    agent_motion = self.encode_npc_motion(self.agent_prev_pos, self.agent_pos)
+                    fov_data["obstacles"][proj_x, proj_y] = agent_motion
 
 
         return {
-            "fov": np.array(fov_data["fov_bounds"]),
             "trajectory": traj,
             "obstacles": fov_data["obstacles"],
             "traffic_lights": fov_data["traffic_lights"],
@@ -459,9 +555,8 @@ class PathEnv(gym.Env):
 
         
     def getFOV_with_layers(self, agent_pos, ignore_npc=None, alert_w=ALERT_W, alert_h=ALERT_H):
-        
         """
-        Compute layers contained in fov based on current agent position and direction.
+        This function computes layers contained in fov based on current agent position and direction.
         """
 
         W, H = self.W, self.H
@@ -488,6 +583,7 @@ class PathEnv(gym.Env):
         traffic = np.zeros((fov_h, fov_w), dtype=np.float32)
         allowed_dirs = np.zeros((fov_h, fov_w), dtype=np.int32)
         
+        # Inject NPCs
         if self.num_npc > 0:
             for npc in self.npcs:
                 if npc is ignore_npc:
@@ -498,8 +594,10 @@ class PathEnv(gym.Env):
                 rx = nx - fix_x
                 ry = ny - fix_y
 
+                motion_code = self.encode_npc_motion(npc["prev_pos"], npc["pos"])
+
                 if 0 <= rx < self.fov_h and 0 <= ry < self.fov_w:
-                    obstacles[rx, ry] = 1
+                    obstacles[rx, ry] = motion_code
 
         for x in range(xmin, xmax + 1):
             for y in range(ymin, ymax + 1):
@@ -555,8 +653,10 @@ class PathEnv(gym.Env):
                         # skip internal 3x3
                         if 1 <= proj_x <= 3 and 1 <= proj_y <= 3:
                             continue
+                        
+                        motion_code = self.encode_npc_motion(npc["prev_pos"], npc["pos"])
 
-                        obstacles[proj_x, proj_y] = 1.0
+                        obstacles[proj_x, proj_y] = motion_code
 
 
                 # Project obstacles
@@ -619,6 +719,39 @@ class PathEnv(gym.Env):
 
         return traj_map
     
+    def encode_npc_motion(self, prev_pos, curr_pos):
+        """Function used to encode the NPC movement for the FOV as follows:
+            - 1: idle
+            - 2: down
+            - 3: up
+            - 4: right
+            - 5: left
+        """
+
+        px, py = prev_pos
+        cx, cy = curr_pos
+
+        dx = cx - px
+        dy = cy - py
+
+        # idle
+        if dx == 0 and dy == 0:
+            return 1
+        # down
+        elif dx == 1:
+            return 2
+        # up
+        elif dx == -1:
+            return 3
+        # right
+        elif dy == 1:
+            return 4
+        # left
+        elif dy == -1:
+            return 5
+        else:
+            return 1
+
     def setPath(self, path):
         """Function that changes the path that the agent must follow"""
         self.path = path
