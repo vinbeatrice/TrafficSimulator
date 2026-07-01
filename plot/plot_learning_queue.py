@@ -44,7 +44,7 @@ def moving_average(values, window=100):
     )
 
 
-def plot_learning_curve_with_baseline(episode_rewards, baseline_rewards, save_path=None, window=100):
+def plot_learning_curve_with_baseline(episode_rewards, baseline_rewards, save_path=None, window=150):
 
     plt.figure(figsize=(12, 6))
 

@@ -50,10 +50,10 @@ def restore_env_state(env, snapshot):
 def train():
     # ---- Environment creation ----
     grid_map = GridMap(obstacle_map=OBSTACLE_MAP, traffic_light_map=TL_MAP, direction_map=DIRECTION_MAP)
-    env = PathEnv(grid_map=grid_map, path=PATHS[0], fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TRAIN, max_steps=MAX_STEPS, num_npc=15, npc_policy_path=None)
+    env = PathEnv(grid_map=grid_map, path=PATHS[0], fov=(FOV_W, FOV_H), render_mode=RENDER_MODE_TRAIN, max_steps=MAX_STEPS, num_npc=30, npc_policy_path=NPC_PATH)
     print("[INFO] Environment created.")
     #baseline_env = PathEnv(grid_map=grid_map, path=PATHS[0], fov=(FOV_W, FOV_H), max_steps=MAX_STEPS, render_mode=None, num_npc=15, npc_policy_path=NPC_PATH)
-    print("[INFO] Baseline Environment created.")
+    #print("[INFO] Baseline Environment created.")
     obs, _ = env.reset()
 
     # ---- Agent creation ----
@@ -200,7 +200,7 @@ def train():
     print(f"\n[INFO] Training time: {total_time:.2f} sec ({total_time/60:.2f} min)")
 
     # save weights
-    torch.save(agent.policy_net.state_dict(), "weights/proj_aware_1v15_baseline_weights.pt")
+    torch.save(agent.policy_net.state_dict(), "weights/proj_aware_1v30_weights.pt")
 
 
     # ---- Plots ----
@@ -212,7 +212,7 @@ def train():
     plot_loss(agent.losses)
     #plot_all_paths(reward_per_path=reward_per_path)
 
-    print(f"[INFO] Weight saved in proj_aware_1v15_baseline_weights.pt")
+    print(f"[INFO] Weight saved in proj_aware_1v30_weights.pt")
 
 if __name__ == "__main__":
     train()

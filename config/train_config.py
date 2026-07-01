@@ -17,7 +17,7 @@ REPLAY_BUFFER_SIZE = 50_000
 SAVE_PATH = "weights/dqn_final_weights.pt"
 MULTI_PATH = "weights/dqn_multi_agent_final_weights.pt"
 
-NPC_PATH = "weights/proj_aware_v4_weights.pt"
+NPC_PATH = "weights/proj_aware_1v15_weights.pt"
 
 
 
